@@ -30,4 +30,6 @@ bool rtc_mem_read(unsigned short addr, void *dst, unsigned short length);
 bool rtc_mem_write(unsigned short dst, const void *src, unsigned short length);
 int connect_to_http_server();
 char *send_request(char *request, unsigned short response_buffer_length, unsigned int *milliseconds_counter);
+int get_request_content_length(char *request);
+char *get_request_content(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter);
 #endif

@@ -294,6 +294,167 @@ void send_deferred_requests_task(void *pvParameters) {
    }
 }
 
+static void send_response(int socket, char *request_content) {
+   #ifdef ALLOW_USE_PRINTF
+   printf("All data received\n");
+   #endif
+
+   char *response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+   int sent = write(socket, response, strlen(response));
+
+   if (sent < 0) {
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nError occurred during sending\n");
+      #endif
+   } else {
+      #ifdef ALLOW_USE_PRINTF
+      printf("Sent %d bytes\n", sent);
+      #endif
+   }
+
+   if (request_content != NULL) {
+      FREE(request_content);
+   }
+}
+
+static void tcp_server_task(void *pvParameters) {
+   for (;;) {
+      int listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+
+      if (listen_socket == -1) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nError on socket opening, time: %u\n", milliseconds_counter_g);
+         #endif
+
+         vTaskDelay(10000 / portTICK_RATE_MS);
+         continue;
+      }
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nSocked %d created, time: %u\n", listen_socket, milliseconds_counter_g);
+      #endif
+
+      struct sockaddr_in sock_addr;
+      sock_addr.sin_addr.s_addr = INADDR_ANY;
+      sock_addr.sin_family = AF_INET;
+      sock_addr.sin_port = htons(LOCAL_SERVER_PORT);
+
+      int ret = bind(listen_socket, (struct sockaddr*) &sock_addr, sizeof(sock_addr));
+
+      if (ret != 0) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nSocked %d binding error, time: %u\n", listen_socket, milliseconds_counter_g);
+         #endif
+
+         vTaskDelay(10000 / portTICK_RATE_MS);
+         continue;
+      }
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("Socked %d binding OK. Listening..., time: %u\n", listen_socket, milliseconds_counter_g);
+      #endif
+
+      ret = listen(listen_socket, 5);
+
+      if (ret != 0) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nSocked %d listening error, time: %u\n", listen_socket, milliseconds_counter_g);
+         #endif
+
+         vTaskDelay(10000 / portTICK_RATE_MS);
+         continue;
+      }
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("Socked %d listening OK, time: %u\n", listen_socket, milliseconds_counter_g);
+      #endif
+
+      struct sockaddr_in client_addr;
+      unsigned int addr_len = sizeof(client_addr);
+      int accept_socket = accept(listen_socket, (struct sockaddr *) &client_addr, &addr_len);
+
+      if (accept_socket < 0) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nUnable to accept connection: errno %d\n", errno);
+         #endif
+
+         break;
+      }
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("Socket %d accepted\n", accept_socket);
+      #endif
+
+      unsigned short rx_buffer_size = 300;
+      char rx_buffer[rx_buffer_size];
+      int request_content_length = -1;
+      char *request_content = NULL;
+
+      while (true) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("Receiving..., time: %u\n", milliseconds_counter_g);
+         #endif
+
+         int received_bytes = read(accept_socket, rx_buffer, rx_buffer_size - 1);
+
+         if (received_bytes < 0) {
+            #ifdef ALLOW_USE_PRINTF
+            printf("\nReceive failed. Error no.: %d, time: %u\n", received_bytes, milliseconds_counter_g);
+            #endif
+
+            break;
+         } else if (received_bytes == 0) {
+            #ifdef ALLOW_USE_PRINTF
+            printf("All data received\n");
+            #endif
+
+            send_response(accept_socket, request_content);
+            break;
+         } else {
+            rx_buffer[received_bytes] = 0; // Null-terminate whatever we received and treat like a string
+
+            #ifdef ALLOW_USE_PRINTF
+            char addr_str[20];
+            inet_ntoa_r(((struct sockaddr_in *) &client_addr)->sin_addr.s_addr, addr_str, sizeof(addr_str) - 1);
+
+            printf("Received %d bytes from %s\n", received_bytes, addr_str);
+            printf("Content: %s\n", rx_buffer);
+            #endif
+
+            if (request_content_length < 0) {
+               request_content_length = get_request_content_length(rx_buffer);
+
+               #ifdef ALLOW_USE_PRINTF
+               printf("Request payload length: %d\n", request_content_length);
+               #endif
+            }
+
+            if (request_content_length > 0) {
+               request_content = get_request_content(request_content, rx_buffer, &milliseconds_counter_g);
+
+               #ifdef ALLOW_USE_PRINTF
+               printf("Request payload: %s\n", request_content);
+               #endif
+            }
+
+            if (received_bytes < rx_buffer_size - 1) {
+               send_response(accept_socket, request_content);
+               break;
+            }
+         }
+      }
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("Shutting down sockets %d and %d, restarting...\n", accept_socket, listen_socket);
+      #endif
+
+      shutdown(accept_socket, 0);
+      close(accept_socket);
+      shutdown(listen_socket, 0);
+      close(listen_socket);
+   }
+}
+
 static void pins_config() {
    gpio_config_t output_pins;
    output_pins.mode = GPIO_MODE_OUTPUT;
@@ -307,6 +468,8 @@ static void pins_config() {
 static void on_wifi_connected() {
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
    repetitive_ap_connecting_errors_counter_g = 0;
+
+   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, NULL);
 }
 
 static void on_wifi_disconnected() {
@@ -398,8 +561,8 @@ void app_main(void) {
 
    wifi_init_sta(on_wifi_connected, on_wifi_disconnected, blink_on_wifi_connection);
 
-   xTaskCreate(scan_access_point_task, "scan_access_point_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-   xTaskCreate(send_deferred_requests_task, "send_deferred_requests_task", configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL);
+   //xTaskCreate(scan_access_point_task, "scan_access_point_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
 
    os_timer_setfn(&errors_checker_timer_g, (os_timer_func_t *) check_errors_amount, NULL);
    os_timer_arm(&errors_checker_timer_g, ERRORS_CHECKER_INTERVAL_MS, true);

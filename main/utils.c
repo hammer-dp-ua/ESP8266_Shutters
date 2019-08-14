@@ -399,7 +399,7 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
          final_response_result[received_bytes_amount] = '\0';
 
          #ifdef ALLOW_USE_PRINTF
-         printf("\nFinal response: %s, time: %u\n", final_response_result, *milliseconds_counter);
+         printf("Final response: %s, time: %u\n", final_response_result, *milliseconds_counter);
          #endif
 
          break;
@@ -420,8 +420,8 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
          received_bytes_amount += max_length_exceed ? 0 : len;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("\nReceived %d bytes, time: %u\n", len, *milliseconds_counter);
-         printf("\nResponse: %s\n", tmp_buffer);
+         printf("Received %d bytes, time: %u\n", len, *milliseconds_counter);
+         printf("Response: %s\n", tmp_buffer);
          #endif
       }
    }
@@ -434,4 +434,66 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
    close(socket_id);
 
    return final_response_result;
+}
+
+int get_request_content_length(char *request) {
+   char *content_length_header = "Content-Length: ";
+   char *content_length_header_pointer = strstr(request, content_length_header);
+   int value = -1;
+
+   if (content_length_header_pointer != NULL) {
+      char *value_first_digit = (content_length_header_pointer + strlen(content_length_header));
+
+      for(int i = 0; *(value_first_digit + i) >= '0' && *(value_first_digit + i) <= '9'; i++) {
+         if (value == -1) {
+            value = 0;
+         }
+
+         value *= 10;
+         value += *(value_first_digit + i) - '0';
+      }
+   }
+   return value;
+}
+
+char *get_request_content(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter) {
+   if (request == NULL) {
+      return already_read_request_content_part;
+   }
+
+   if (already_read_request_content_part == NULL) {
+      // First part
+      char *request_content = NULL;
+      char *request_content_new_line = strstr(request, "\r\n\r\n");
+
+      if (request_content_new_line != NULL) {
+         request_content = request_content_new_line + 4;
+      } else {
+         request_content_new_line = strstr(request, "\n\n");
+
+         if (request_content_new_line != NULL) {
+            request_content = request_content_new_line + 2;
+         }
+      }
+
+      if (request_content == NULL) {
+         return NULL;
+      }
+
+      unsigned int request_content_length = strlen(request_content);
+      char *allocated = MALLOC(request_content_length + 1, *milliseconds_counter);
+      memcpy(allocated, request_content, request_content_length);
+      allocated[request_content_length] = 0;
+      return allocated;
+   } else {
+      unsigned int already_read_request_content_part_length = strlen(already_read_request_content_part);
+      unsigned int current_request_part_content_length = strlen(request);
+      char *allocated = MALLOC(already_read_request_content_part_length + current_request_part_content_length + 1, *milliseconds_counter);
+
+      memcpy(allocated, already_read_request_content_part, already_read_request_content_part_length);
+      memcpy(allocated + already_read_request_content_part_length, request, current_request_part_content_length);
+      allocated[already_read_request_content_part_length + current_request_part_content_length] = 0;
+      FREE(already_read_request_content_part);
+      return allocated;
+   }
 }

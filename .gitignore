@@ -24,3 +24,5 @@
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.epp.logging.aeri.ide
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.cdt.core/*.pdom
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.ltk.core.refactoring
+/Link_to_ESP8266_Shutters_workspace/.metadata/*.log
+/Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.root/*.tree
