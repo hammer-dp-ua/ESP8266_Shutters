@@ -456,7 +456,7 @@ int get_request_content_length(char *request) {
    return value;
 }
 
-char *get_request_content(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter) {
+char *get_request_payload(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter) {
    if (request == NULL) {
       return already_read_request_content_part;
    }
@@ -495,5 +495,57 @@ char *get_request_content(char *already_read_request_content_part, char *request
       allocated[already_read_request_content_part_length + current_request_part_content_length] = 0;
       FREE(already_read_request_content_part);
       return allocated;
+   }
+}
+
+char *get_gson_element_value(char *json_string, char *json_element_to_find, bool *is_numeric_param, unsigned int *milliseconds_counter) {
+   if (json_string == NULL || json_element_to_find == NULL) {
+      return NULL;
+   }
+
+   char *json_element_to_find_in_string = strstr(json_string, json_element_to_find);
+   unsigned int json_element_to_find_length = (unsigned int) strlen(json_element_to_find);
+   char *value = NULL;
+
+   if (json_element_to_find_in_string != NULL) {
+      value = json_element_to_find_in_string + json_element_to_find_length;
+      value++; // For closing '"' character
+   } else {
+      return NULL;
+   }
+
+   if (*value != ':') {
+      return NULL;
+   }
+   value++;
+   if (*value == '\"') {
+      value++;
+   }
+
+   unsigned int value_length = 0;
+   bool is_numeric = true;
+
+   while (*value != '\0' && *value != '\"' && *value != '}') {
+      if ((*value < '0' || *value > '9') && !(value_length == 0 && *value == '-') && *value != '.') { // Exceptions for "-" sign and "."
+         is_numeric = false;
+      }
+
+      value_length++;
+      value++;
+   }
+   value -= value_length; // Return to the beginning
+
+   char *returning_value = MALLOC(value_length + 1, *milliseconds_counter);
+
+   memcpy(returning_value, value, value_length);
+   returning_value[value_length] = 0;
+   *is_numeric_param = is_numeric;
+   return returning_value;
+}
+
+void shutdown_and_close_socket(int socket) {
+   if (socket >= 0) {
+      shutdown(socket, 0);
+      close(socket);
    }
 }

@@ -35,6 +35,7 @@
 #define REQUEST_ERROR_OCCURRED_FLAG (1 << 2)
 
 #define ERRORS_CHECKER_INTERVAL_MS (10 * 1000)
+#define STATUS_REQUESTS_SEND_INTERVAL_MS (60 * 1000)
 
 #define MILLISECONDS_COUNTER_DIVIDER 10
 
@@ -49,9 +50,11 @@ typedef enum {
    SOFTWARE_UPGRADE
 } SYSTEM_RESTART_REASON_TYPE;
 
+const char SEND_STATUS_INFO_TASK_NAME[] = "send_status_info_task";
+
 const char RESPONSE_SERVER_SENT_OK[] = "\"statusCode\":\"OK\"";
-const char SHUTTERS_DEFERRED_POST_REQUEST[] =
-      "POST /server/esp8266/shutters HTTP/1.1\r\n"
+const char STATUS_INFO_POST_REQUEST[] =
+      "POST /server/esp8266/statusInfo HTTP/1.1\r\n"
       "Content-Length: <1>\r\n"
       "Host: <2>\r\n"
       "User-Agent: ESP8266\r\n"
@@ -59,7 +62,7 @@ const char SHUTTERS_DEFERRED_POST_REQUEST[] =
       "Connection: close\r\n"
       "Accept: application/json\r\n\r\n"
       "<3>\r\n";
-const char SHUTTERS_REQUEST_PAYLOAD_TEMPLATE[] =
+const char STATUS_INFO_REQUEST_PAYLOAD_TEMPLATE[] =
       "{"
       "\"gain\":\"<1>\","
       "\"deviceName\":\"<2>\","

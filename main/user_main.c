@@ -23,13 +23,18 @@ static unsigned char pending_connection_errors_counter_g;
 static unsigned int repetitive_ap_connecting_errors_counter_g = 0;
 static int connection_error_code_g;
 
+static int opened_sockets_g[2];
+
 static os_timer_t millisecons_time_serv_g;
 static os_timer_t errors_checker_timer_g;
 static os_timer_t blink_both_leds_g;
+static os_timer_t status_sender_timer_g;
 
 static EventGroupHandle_t general_event_group_g;
 
 static SemaphoreHandle_t wirelessNetworkActionsSemaphore_g;
+
+static TaskHandle_t tcp_server_task_handle_g;
 
 static void milliseconds_counter() {
    milliseconds_counter_g++;
@@ -137,167 +142,179 @@ static void on_response_error() {
    xEventGroupSetBits(general_event_group_g, REQUEST_ERROR_OCCURRED_FLAG);
 }
 
-void send_deferred_requests_task(void *pvParameters) {
-   for (;;) {
-      if (is_connected_to_wifi() == false || (xEventGroupGetBits(general_event_group_g) & UPDATE_FIRMWARE_FLAG) ||
-            (xEventGroupGetBits(general_event_group_g) & REQUEST_ERROR_OCCURRED_FLAG)) {
-         vTaskDelay(10000 / portTICK_RATE_MS);
-         xEventGroupClearBits(general_event_group_g, REQUEST_ERROR_OCCURRED_FLAG);
-         continue;
+void send_status_info_task(void *pvParameters) {
+   xSemaphoreTake(wirelessNetworkActionsSemaphore_g, portMAX_DELAY);
+   blink_on_send(SERVER_AVAILABILITY_STATUS_LED_PIN);
+
+   char signal_strength[5];
+   snprintf(signal_strength, 5, "%d", signal_strength_g);
+   char errors_counter[6];
+   snprintf(errors_counter, 6, "%u", errors_counter_g);
+   char pending_connection_errors_counter[4];
+   snprintf(pending_connection_errors_counter, 4, "%u", pending_connection_errors_counter_g);
+   char uptime[11];
+   snprintf(uptime, 11, "%u", milliseconds_counter_g / MILLISECONDS_COUNTER_DIVIDER);
+   char *build_timestamp = "";
+   char free_heap_space[7];
+   snprintf(free_heap_space, 7, "%u", esp_get_free_heap_size());
+   char *reset_reason = "";
+   char *system_restart_reason = "";
+
+   if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
+      char build_timestamp_filled[30];
+      snprintf(build_timestamp_filled, 30, "%s", __TIMESTAMP__);
+      build_timestamp = build_timestamp_filled;
+
+      esp_reset_reason_t rst_info = esp_reset_reason();
+
+      switch(rst_info) {
+         case ESP_RST_UNKNOWN:
+            reset_reason = "Unknown";
+            break;
+         case ESP_RST_POWERON:
+            reset_reason = "Power on";
+            break;
+         case ESP_RST_EXT:
+            reset_reason = "Reset by external pin";
+            break;
+         case ESP_RST_SW:
+            reset_reason = "Software";
+            break;
+         case ESP_RST_PANIC:
+            reset_reason = "Exception/panic";
+            break;
+         case ESP_RST_INT_WDT:
+            reset_reason = "Watchdog";
+            break;
+         case ESP_RST_TASK_WDT:
+            reset_reason = "Task watchdog";
+            break;
+         case ESP_RST_WDT:
+            reset_reason = "Other watchdog";
+            break;
+         case ESP_RST_DEEPSLEEP:
+            reset_reason = "Deep sleep";
+            break;
+         case ESP_RST_BROWNOUT:
+            reset_reason = "Brownout";
+            break;
+         case ESP_RST_SDIO:
+            reset_reason = "SDIO";
+            break;
       }
 
-      xSemaphoreTake(wirelessNetworkActionsSemaphore_g, portMAX_DELAY);
-      blink_on_send(SERVER_AVAILABILITY_STATUS_LED_PIN);
+      SYSTEM_RESTART_REASON_TYPE system_restart_reason_type;
 
-      char signal_strength[5];
-      snprintf(signal_strength, 5, "%d", signal_strength_g);
-      char errors_counter[6];
-      snprintf(errors_counter, 6, "%u", errors_counter_g);
-      char pending_connection_errors_counter[4];
-      snprintf(pending_connection_errors_counter, 4, "%u", pending_connection_errors_counter_g);
-      char uptime[11];
-      snprintf(uptime, 11, "%u", milliseconds_counter_g / MILLISECONDS_COUNTER_DIVIDER);
-      char *build_timestamp = "";
-      char free_heap_space[7];
-      snprintf(free_heap_space, 7, "%u", esp_get_free_heap_size());
-      char *reset_reason = "";
-      char *system_restart_reason = "";
+      rtc_mem_read(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &system_restart_reason_type, 4);
 
-      if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
-         char build_timestamp_filled[30];
-         snprintf(build_timestamp_filled, 30, "%s", __TIMESTAMP__);
-         build_timestamp = build_timestamp_filled;
+      if (system_restart_reason_type == ACCESS_POINT_CONNECTION_ERROR) {
+         int connection_error_code = 1;
+         char system_restart_reason_inner[31];
 
-         esp_reset_reason_t rst_info = esp_reset_reason();
+         rtc_mem_read(CONNECTION_ERROR_CODE_RTC_ADDRESS, &connection_error_code, 4);
 
-         switch(rst_info) {
-            case ESP_RST_UNKNOWN:
-               reset_reason = "Unknown";
-               break;
-            case ESP_RST_POWERON:
-               reset_reason = "Power on";
-               break;
-            case ESP_RST_EXT:
-               reset_reason = "Reset by external pin";
-               break;
-            case ESP_RST_SW:
-               reset_reason = "Software";
-               break;
-            case ESP_RST_PANIC:
-               reset_reason = "Exception/panic";
-               break;
-            case ESP_RST_INT_WDT:
-               reset_reason = "Watchdog";
-               break;
-            case ESP_RST_TASK_WDT:
-               reset_reason = "Task watchdog";
-               break;
-            case ESP_RST_WDT:
-               reset_reason = "Other watchdog";
-               break;
-            case ESP_RST_DEEPSLEEP:
-               reset_reason = "Deep sleep";
-               break;
-            case ESP_RST_BROWNOUT:
-               reset_reason = "Brownout";
-               break;
-            case ESP_RST_SDIO:
-               reset_reason = "SDIO";
-               break;
-         }
+         snprintf(system_restart_reason_inner, 31, "AP connections error. Code: %d", connection_error_code);
+         system_restart_reason = system_restart_reason_inner;
+      } else if (system_restart_reason_type == REQUEST_CONNECTION_ERROR) {
+         int connection_error_code = 1;
+         char system_restart_reason_inner[25];
 
-         SYSTEM_RESTART_REASON_TYPE system_restart_reason_type;
+         rtc_mem_read(CONNECTION_ERROR_CODE_RTC_ADDRESS, &connection_error_code, 4);
 
-         rtc_mem_read(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &system_restart_reason_type, 4);
-
-         if (system_restart_reason_type == ACCESS_POINT_CONNECTION_ERROR) {
-            int connection_error_code = 1;
-            char system_restart_reason_inner[31];
-
-            rtc_mem_read(CONNECTION_ERROR_CODE_RTC_ADDRESS, &connection_error_code, 4);
-
-            snprintf(system_restart_reason_inner, 31, "AP connections error. Code: %d", connection_error_code);
-            system_restart_reason = system_restart_reason_inner;
-         } else if (system_restart_reason_type == REQUEST_CONNECTION_ERROR) {
-            int connection_error_code = 1;
-            char system_restart_reason_inner[25];
-
-            rtc_mem_read(CONNECTION_ERROR_CODE_RTC_ADDRESS, &connection_error_code, 4);
-
-            snprintf(system_restart_reason_inner, 25, "Requests error. Code: %d", connection_error_code);
-            system_restart_reason = system_restart_reason_inner;
-         } else if (system_restart_reason_type == SOFTWARE_UPGRADE) {
-            system_restart_reason = "Software upgrade";
-         }
-
-         unsigned int overwrite_value = 0xFFFF;
-         rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &overwrite_value, 4);
-         rtc_mem_write(CONNECTION_ERROR_CODE_RTC_ADDRESS, &overwrite_value, 4);
+         snprintf(system_restart_reason_inner, 25, "Requests error. Code: %d", connection_error_code);
+         system_restart_reason = system_restart_reason_inner;
+      } else if (system_restart_reason_type == SOFTWARE_UPGRADE) {
+         system_restart_reason = "Software upgrade";
       }
 
-      const char *request_payload_template_parameters[] =
-            {signal_strength, DEVICE_NAME, errors_counter, pending_connection_errors_counter, uptime, build_timestamp, free_heap_space,
-             reset_reason, system_restart_reason, NULL};
-      char *request_payload = set_string_parameters(SHUTTERS_REQUEST_PAYLOAD_TEMPLATE, request_payload_template_parameters);
-
-      #ifdef ALLOW_USE_PRINTF
-      //printf("\nRequest payload: %s\n", request_payload);
-      #endif
-
-      unsigned short request_payload_length = strnlen(request_payload, 0xFFFF);
-      char request_payload_length_string[6];
-      snprintf(request_payload_length_string, 6, "%u", request_payload_length);
-      const char *request_template_parameters[] = {request_payload_length_string, SERVER_IP_ADDRESS, request_payload, NULL};
-      char *request = set_string_parameters(SHUTTERS_DEFERRED_POST_REQUEST, request_template_parameters);
-      FREE(request_payload);
-
-      #ifdef ALLOW_USE_PRINTF
-      printf("\nCreated request: %s\nTime: %u\n", request, milliseconds_counter_g);
-      #endif
-
-      char *response = send_request(request, 255, &milliseconds_counter_g);
-
-      FREE(request);
-
-      if (response == NULL) {
-         on_response_error();
-      } else {
-         if (strstr(response, RESPONSE_SERVER_SENT_OK)) {
-            repetitive_request_errors_counter_g = 0;
-            gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
-
-            if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
-               xEventGroupSetBits(general_event_group_g, FIRST_STATUS_INFO_SENT_FLAG);
-            }
-
-            #ifdef ALLOW_USE_PRINTF
-            printf("\nResponse OK, time: %u\n", milliseconds_counter_g);
-            #endif
-
-            if (strstr(response, UPDATE_FIRMWARE)) {
-               xEventGroupSetBits(general_event_group_g, UPDATE_FIRMWARE_FLAG);
-               start_both_leds_blinking();
-
-               SYSTEM_RESTART_REASON_TYPE reason = SOFTWARE_UPGRADE;
-               rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &reason, 4);
-
-               update_firmware();
-            }
-         } else {
-            on_response_error();
-         }
-
-         FREE(response);
-      }
-
-      xSemaphoreGive(wirelessNetworkActionsSemaphore_g);
+      unsigned int overwrite_value = 0xFFFF;
+      rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &overwrite_value, 4);
+      rtc_mem_write(CONNECTION_ERROR_CODE_RTC_ADDRESS, &overwrite_value, 4);
    }
+
+   const char *request_payload_template_parameters[] =
+         {signal_strength, DEVICE_NAME, errors_counter, pending_connection_errors_counter, uptime, build_timestamp, free_heap_space,
+          reset_reason, system_restart_reason, NULL};
+   char *request_payload = set_string_parameters(STATUS_INFO_REQUEST_PAYLOAD_TEMPLATE, request_payload_template_parameters);
+
+   #ifdef ALLOW_USE_PRINTF
+   //printf("\nRequest payload: %s\n", request_payload);
+   #endif
+
+   unsigned short request_payload_length = strnlen(request_payload, 0xFFFF);
+   char request_payload_length_string[6];
+   snprintf(request_payload_length_string, 6, "%u", request_payload_length);
+   const char *request_template_parameters[] = {request_payload_length_string, SERVER_IP_ADDRESS, request_payload, NULL};
+   char *request = set_string_parameters(STATUS_INFO_POST_REQUEST, request_template_parameters);
+   FREE(request_payload);
+
+   #ifdef ALLOW_USE_PRINTF
+   printf("\nCreated request: %s\nTime: %u\n", request, milliseconds_counter_g);
+   #endif
+
+   char *response = send_request(request, 255, &milliseconds_counter_g);
+
+   FREE(request);
+
+   if (response == NULL) {
+      on_response_error();
+   } else {
+      if (strstr(response, RESPONSE_SERVER_SENT_OK)) {
+         repetitive_request_errors_counter_g = 0;
+         gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
+
+         if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
+            xEventGroupSetBits(general_event_group_g, FIRST_STATUS_INFO_SENT_FLAG);
+         }
+
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nResponse OK, time: %u\n", milliseconds_counter_g);
+         #endif
+
+         if (strstr(response, UPDATE_FIRMWARE)) {
+            xEventGroupSetBits(general_event_group_g, UPDATE_FIRMWARE_FLAG);
+            start_both_leds_blinking();
+
+            SYSTEM_RESTART_REASON_TYPE reason = SOFTWARE_UPGRADE;
+            rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &reason, 4);
+
+            // Stop TCP server
+            vTaskDelete(tcp_server_task_handle_g);
+
+            update_firmware();
+         }
+      } else {
+         on_response_error();
+      }
+
+      FREE(response);
+   }
+
+   xSemaphoreGive(wirelessNetworkActionsSemaphore_g);
+   vTaskDelete(NULL);
 }
 
-static void send_response(int socket, char *request_content) {
+static void send_status_info() {
+   if (is_connected_to_wifi() == false || xTaskGetHandle(SEND_STATUS_INFO_TASK_NAME) != NULL ||
+         (xEventGroupGetBits(general_event_group_g) & UPDATE_FIRMWARE_FLAG)) {
+      return;
+   }
+
+   xTaskCreate(send_status_info_task, SEND_STATUS_INFO_TASK_NAME, configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL);
+}
+
+static void schedule_sending_status_info(unsigned int timeout_ms) {
+   os_timer_disarm(&status_sender_timer_g);
+   os_timer_setfn(&status_sender_timer_g, (os_timer_func_t *) send_status_info, NULL);
+   os_timer_arm(&status_sender_timer_g, timeout_ms, true);
+}
+
+static void process_request_and_send_response(char *request_payload, int socket) {
    #ifdef ALLOW_USE_PRINTF
    printf("All data received\n");
    #endif
+
+   blink_on_send(SERVER_AVAILABILITY_STATUS_LED_PIN);
 
    char *response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
    int sent = write(socket, response, strlen(response));
@@ -312,8 +329,17 @@ static void send_response(int socket, char *request_content) {
       #endif
    }
 
-   if (request_content != NULL) {
-      FREE(request_content);
+   bool is_numeric_value = false;
+   char *gson_element_value = get_gson_element_value(request_payload, "abc", &is_numeric_value, &milliseconds_counter_g);
+   #ifdef ALLOW_USE_PRINTF
+   printf("Value of JSON 'abc':%s, is numeric: %s\n", gson_element_value, (is_numeric_value ? "true" : "false"));
+   #endif
+
+   if (request_payload != NULL) {
+      FREE(request_payload);
+   }
+   if (gson_element_value != NULL) {
+      FREE(gson_element_value);
    }
 }
 
@@ -326,9 +352,11 @@ static void tcp_server_task(void *pvParameters) {
          printf("\nError on socket opening, time: %u\n", milliseconds_counter_g);
          #endif
 
-         vTaskDelay(10000 / portTICK_RATE_MS);
+         vTaskDelay(1000 / portTICK_RATE_MS);
          continue;
       }
+
+      opened_sockets_g[0] = listen_socket;
 
       #ifdef ALLOW_USE_PRINTF
       printf("\nSocked %d created, time: %u\n", listen_socket, milliseconds_counter_g);
@@ -346,7 +374,9 @@ static void tcp_server_task(void *pvParameters) {
          printf("\nSocked %d binding error, time: %u\n", listen_socket, milliseconds_counter_g);
          #endif
 
-         vTaskDelay(10000 / portTICK_RATE_MS);
+         shutdown_and_close_socket(listen_socket);
+         opened_sockets_g[0] = -1;
+         vTaskDelay(1000 / portTICK_RATE_MS);
          continue;
       }
 
@@ -361,7 +391,9 @@ static void tcp_server_task(void *pvParameters) {
          printf("\nSocked %d listening error, time: %u\n", listen_socket, milliseconds_counter_g);
          #endif
 
-         vTaskDelay(10000 / portTICK_RATE_MS);
+         shutdown_and_close_socket(listen_socket);
+         opened_sockets_g[0] = -1;
+         vTaskDelay(1000 / portTICK_RATE_MS);
          continue;
       }
 
@@ -371,6 +403,7 @@ static void tcp_server_task(void *pvParameters) {
 
       struct sockaddr_in client_addr;
       unsigned int addr_len = sizeof(client_addr);
+      // Blocks here until a request
       int accept_socket = accept(listen_socket, (struct sockaddr *) &client_addr, &addr_len);
 
       if (accept_socket < 0) {
@@ -378,17 +411,20 @@ static void tcp_server_task(void *pvParameters) {
          printf("\nUnable to accept connection: errno %d\n", errno);
          #endif
 
-         break;
+         shutdown_and_close_socket(listen_socket);
+         vTaskDelay(1000 / portTICK_RATE_MS);
+         continue;
       }
+      opened_sockets_g[1] = accept_socket;
 
       #ifdef ALLOW_USE_PRINTF
-      printf("Socket %d accepted\n", accept_socket);
+      printf("\nSocket %d accepted\n", accept_socket);
       #endif
 
       unsigned short rx_buffer_size = 300;
       char rx_buffer[rx_buffer_size];
       int request_content_length = -1;
-      char *request_content = NULL;
+      char *request_payload = NULL;
 
       while (true) {
          #ifdef ALLOW_USE_PRINTF
@@ -408,7 +444,7 @@ static void tcp_server_task(void *pvParameters) {
             printf("All data received\n");
             #endif
 
-            send_response(accept_socket, request_content);
+            process_request_and_send_response(request_payload, accept_socket);
             break;
          } else {
             rx_buffer[received_bytes] = 0; // Null-terminate whatever we received and treat like a string
@@ -416,7 +452,6 @@ static void tcp_server_task(void *pvParameters) {
             #ifdef ALLOW_USE_PRINTF
             char addr_str[20];
             inet_ntoa_r(((struct sockaddr_in *) &client_addr)->sin_addr.s_addr, addr_str, sizeof(addr_str) - 1);
-
             printf("Received %d bytes from %s\n", received_bytes, addr_str);
             printf("Content: %s\n", rx_buffer);
             #endif
@@ -430,15 +465,15 @@ static void tcp_server_task(void *pvParameters) {
             }
 
             if (request_content_length > 0) {
-               request_content = get_request_content(request_content, rx_buffer, &milliseconds_counter_g);
+               request_payload = get_request_payload(request_payload, rx_buffer, &milliseconds_counter_g);
 
                #ifdef ALLOW_USE_PRINTF
-               printf("Request payload: %s\n", request_content);
+               printf("Request payload: %s\n", request_payload);
                #endif
             }
 
             if (received_bytes < rx_buffer_size - 1) {
-               send_response(accept_socket, request_content);
+               process_request_and_send_response(request_payload, accept_socket);
                break;
             }
          }
@@ -448,10 +483,10 @@ static void tcp_server_task(void *pvParameters) {
       printf("Shutting down sockets %d and %d, restarting...\n", accept_socket, listen_socket);
       #endif
 
-      shutdown(accept_socket, 0);
-      close(accept_socket);
-      shutdown(listen_socket, 0);
-      close(listen_socket);
+      shutdown_and_close_socket(accept_socket);
+      shutdown_and_close_socket(listen_socket);
+      opened_sockets_g[0] = -1;
+      opened_sockets_g[1] = -1;
    }
 }
 
@@ -465,17 +500,26 @@ static void pins_config() {
    gpio_config(&output_pins);
 }
 
+static void close_opened_sockets() {
+   shutdown_and_close_socket(opened_sockets_g[0]);
+   shutdown_and_close_socket(opened_sockets_g[1]);
+}
+
 static void on_wifi_connected() {
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
    repetitive_ap_connecting_errors_counter_g = 0;
 
-   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, NULL);
+   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, &tcp_server_task_handle_g);
+   send_status_info();
 }
 
 static void on_wifi_disconnected() {
    repetitive_ap_connecting_errors_counter_g++;
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
    gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+
+   vTaskDelete(tcp_server_task_handle_g);
+   close_opened_sockets();
 }
 
 static void blink_on_wifi_connection_task(void *pvParameters) {
@@ -561,11 +605,12 @@ void app_main(void) {
 
    wifi_init_sta(on_wifi_connected, on_wifi_disconnected, blink_on_wifi_connection);
 
-   //xTaskCreate(scan_access_point_task, "scan_access_point_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
+   xTaskCreate(scan_access_point_task, "scan_access_point_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
    os_timer_setfn(&errors_checker_timer_g, (os_timer_func_t *) check_errors_amount, NULL);
    os_timer_arm(&errors_checker_timer_g, ERRORS_CHECKER_INTERVAL_MS, true);
+
+   schedule_sending_status_info(STATUS_REQUESTS_SEND_INTERVAL_MS);
 
    start_100millisecons_counter();
 }

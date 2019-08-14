@@ -31,5 +31,7 @@ bool rtc_mem_write(unsigned short dst, const void *src, unsigned short length);
 int connect_to_http_server();
 char *send_request(char *request, unsigned short response_buffer_length, unsigned int *milliseconds_counter);
 int get_request_content_length(char *request);
-char *get_request_content(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter);
+char *get_request_payload(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter);
+void shutdown_and_close_socket(int socket);
+char *get_gson_element_value(char *json_string, char *json_element_to_find, bool *is_numeric_param, unsigned int *milliseconds_counter);
 #endif
