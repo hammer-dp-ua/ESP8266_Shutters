@@ -26,13 +26,16 @@
 #ifndef MAIN_HEADER
 #define MAIN_HEADER
 
-#define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_5
-#define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_4
+#define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_12
+#define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_14
+#define RELAY_DOWN_PIN                       GPIO_NUM_4
+#define RELAY_UP_PIN                         GPIO_NUM_5
 
 #define SERVER_IS_AVAILABLE_FLAG
 #define FIRST_STATUS_INFO_SENT_FLAG (1 << 0)
 #define UPDATE_FIRMWARE_FLAG        (1 << 1)
 #define REQUEST_ERROR_OCCURRED_FLAG (1 << 2)
+#define DELETE_TCP_SERVER_TASK_FLAG (1 << 3)
 
 #define ERRORS_CHECKER_INTERVAL_MS (10 * 1000)
 #define STATUS_REQUESTS_SEND_INTERVAL_MS (60 * 1000)
@@ -78,6 +81,7 @@ const char UPDATE_FIRMWARE[] = "\"updateFirmware\":true";
 
 static void blink_both_leds();
 static void stop_both_leds_blinking();
+static void close_opened_sockets();
 
 #endif
 

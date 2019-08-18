@@ -3,14 +3,8 @@
  *
  * Required connections:
  * GPIO15 to GND
- * GPIO to GND or to "+" for flashing
+ * GPIO to "+" or to "GND" for flashing
  * EN to "+"
- *
- * SPI SPI_CPOL & SPI_CPHA:
- *    SPI_CPOL - (0) Clock is low when inactive
- *               (1) Clock is high when inactive
- *    SPI_CPHA - (0) Data is valid on clock leading edge
- *               (1) Data is valid on clock trailing edge
  */
 
 #include "user_main.h"
@@ -29,6 +23,8 @@ static os_timer_t millisecons_time_serv_g;
 static os_timer_t errors_checker_timer_g;
 static os_timer_t blink_both_leds_g;
 static os_timer_t status_sender_timer_g;
+static os_timer_t shutters_activity_g;
+static os_timer_t blink_on_shutters_activity_g;
 
 static EventGroupHandle_t general_event_group_g;
 
@@ -60,7 +56,7 @@ static void scan_access_point_task(void *pvParameters) {
 
    for (;;) {
       #ifdef ALLOW_USE_PRINTF
-      printf("Start of Wi-Fi scanning... %u\n", milliseconds_counter_g);
+      printf("\nStart of Wi-Fi scanning... %u\n", milliseconds_counter_g);
       #endif
 
       xSemaphoreTake(wirelessNetworkActionsSemaphore_g, portMAX_DELAY);
@@ -71,7 +67,7 @@ static void scan_access_point_task(void *pvParameters) {
          signal_strength_g = scanned_access_points[0].rssi;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("\nScanned %u access points", scanned_access_points_amount);
+         printf("Scanned %u access points", scanned_access_points_amount);
          for (unsigned char i = 0; i < scanned_access_points_amount; i++) {
             printf("\nScan index: %u, ssid: %s, rssi: %d", i, scanned_access_points[i].ssid, scanned_access_points[i].rssi);
          }
@@ -268,7 +264,7 @@ void send_status_info_task(void *pvParameters) {
          }
 
          #ifdef ALLOW_USE_PRINTF
-         printf("\nResponse OK, time: %u\n", milliseconds_counter_g);
+         printf("Response OK, time: %u\n", milliseconds_counter_g);
          #endif
 
          if (strstr(response, UPDATE_FIRMWARE)) {
@@ -278,8 +274,8 @@ void send_status_info_task(void *pvParameters) {
             SYSTEM_RESTART_REASON_TYPE reason = SOFTWARE_UPGRADE;
             rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &reason, 4);
 
-            // Stop TCP server
-            vTaskDelete(tcp_server_task_handle_g);
+            // TCP server task will be deleted
+            close_opened_sockets();
 
             update_firmware();
          }
@@ -309,6 +305,68 @@ static void schedule_sending_status_info(unsigned int timeout_ms) {
    os_timer_arm(&status_sender_timer_g, timeout_ms, true);
 }
 
+static void blink_on_shutters_opening() {
+   if (gpio_get_level(AP_CONNECTION_STATUS_LED_PIN)) {
+      gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
+   } else {
+      gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
+   }
+}
+
+static void start_blinking_on_shutters_opening() {
+   os_timer_disarm(&blink_on_shutters_activity_g);
+   os_timer_setfn(&blink_on_shutters_activity_g, (os_timer_func_t *) blink_on_shutters_opening, NULL);
+   os_timer_arm(&blink_on_shutters_activity_g, 200, true);
+}
+
+static void blink_on_shutters_closing() {
+   if (gpio_get_level(SERVER_AVAILABILITY_STATUS_LED_PIN)) {
+      gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
+   } else {
+      gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+   }
+}
+
+static void start_blinking_on_shutters_closing() {
+   os_timer_disarm(&blink_on_shutters_activity_g);
+   os_timer_setfn(&blink_on_shutters_activity_g, (os_timer_func_t *) blink_on_shutters_closing, NULL);
+   os_timer_arm(&blink_on_shutters_activity_g, 200, true);
+}
+
+static void stop_blinking_on_shutters_activity() {
+   os_timer_disarm(&blink_on_shutters_activity_g);
+   gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
+   gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+
+   if (is_connected_to_wifi()) {
+      gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
+   }
+}
+
+static void stop_shutters_activity() {
+   gpio_set_level(RELAY_DOWN_PIN, 0);
+   gpio_set_level(RELAY_UP_PIN, 0);
+   stop_blinking_on_shutters_activity();
+}
+
+static void open_shutters(unsigned char opening_time_sec) {
+   os_timer_disarm(&shutters_activity_g);
+   stop_shutters_activity();
+   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
+   os_timer_arm(&shutters_activity_g, ((unsigned int) opening_time_sec) * 1000, false);
+   gpio_set_level(RELAY_UP_PIN, 1);
+   start_blinking_on_shutters_opening();
+}
+
+static void close_shutters(unsigned char closing_time_sec) {
+   os_timer_disarm(&shutters_activity_g);
+   stop_shutters_activity();
+   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
+   os_timer_arm(&shutters_activity_g, ((unsigned int) closing_time_sec) * 1000, false);
+   gpio_set_level(RELAY_DOWN_PIN, 1);
+   start_blinking_on_shutters_closing();
+}
+
 static void process_request_and_send_response(char *request_payload, int socket) {
    #ifdef ALLOW_USE_PRINTF
    printf("All data received\n");
@@ -330,21 +388,61 @@ static void process_request_and_send_response(char *request_payload, int socket)
    }
 
    bool is_numeric_value = false;
-   char *gson_element_value = get_gson_element_value(request_payload, "abc", &is_numeric_value, &milliseconds_counter_g);
+   char *opening_activity_duration = get_gson_element_value(request_payload, "open", &is_numeric_value, &milliseconds_counter_g);
+
    #ifdef ALLOW_USE_PRINTF
-   printf("Value of JSON 'abc':%s, is numeric: %s\n", gson_element_value, (is_numeric_value ? "true" : "false"));
+   printf("Value of JSON 'open':%s, is numeric: %s\n", opening_activity_duration, (is_numeric_value ? "true" : "false"));
    #endif
+
+   if (opening_activity_duration != NULL) {
+      if (is_numeric_value) {
+         int opening_time = atoi(opening_activity_duration);
+
+         if (opening_time > 0) {
+            open_shutters((unsigned char) opening_time);
+         }
+      }
+
+      FREE(opening_activity_duration);
+   }
+
+   char *closing_activity_duration = get_gson_element_value(request_payload, "close", &is_numeric_value, &milliseconds_counter_g);
+
+   #ifdef ALLOW_USE_PRINTF
+   printf("Value of JSON 'close':%s, is numeric: %s\n", closing_activity_duration, (is_numeric_value ? "true" : "false"));
+   #endif
+
+   if (closing_activity_duration != NULL) {
+      if (is_numeric_value) {
+         int closing_time = atoi(closing_activity_duration);
+
+         if (closing_time > 0) {
+            close_shutters((unsigned char) closing_time);
+         }
+      }
+
+      FREE(closing_activity_duration);
+   }
 
    if (request_payload != NULL) {
       FREE(request_payload);
-   }
-   if (gson_element_value != NULL) {
-      FREE(gson_element_value);
    }
 }
 
 static void tcp_server_task(void *pvParameters) {
    for (;;) {
+      if ((xEventGroupGetBits(general_event_group_g) & UPDATE_FIRMWARE_FLAG) ||
+            (xEventGroupGetBits(general_event_group_g) & DELETE_TCP_SERVER_TASK_FLAG)) {
+         // If some request is receipted during update
+         #ifdef ALLOW_USE_PRINTF
+         printf("tcp_server_task is to be removed\n");
+         #endif
+
+         xEventGroupClearBits(general_event_group_g, DELETE_TCP_SERVER_TASK_FLAG);
+
+         vTaskDelete(NULL);
+      }
+
       int listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
 
       if (listen_socket == -1) {
@@ -359,7 +457,7 @@ static void tcp_server_task(void *pvParameters) {
       opened_sockets_g[0] = listen_socket;
 
       #ifdef ALLOW_USE_PRINTF
-      printf("\nSocked %d created, time: %u\n", listen_socket, milliseconds_counter_g);
+      printf("\nSocket %d created, time: %u\n", listen_socket, milliseconds_counter_g);
       #endif
 
       struct sockaddr_in sock_addr;
@@ -381,14 +479,14 @@ static void tcp_server_task(void *pvParameters) {
       }
 
       #ifdef ALLOW_USE_PRINTF
-      printf("Socked %d binding OK. Listening..., time: %u\n", listen_socket, milliseconds_counter_g);
+      printf("Socket %d binding OK. Listening..., time: %u\n", listen_socket, milliseconds_counter_g);
       #endif
 
       ret = listen(listen_socket, 5);
 
       if (ret != 0) {
          #ifdef ALLOW_USE_PRINTF
-         printf("\nSocked %d listening error, time: %u\n", listen_socket, milliseconds_counter_g);
+         printf("\nSocket %d listening error, time: %u\n", listen_socket, milliseconds_counter_g);
          #endif
 
          shutdown_and_close_socket(listen_socket);
@@ -398,13 +496,18 @@ static void tcp_server_task(void *pvParameters) {
       }
 
       #ifdef ALLOW_USE_PRINTF
-      printf("Socked %d listening OK, time: %u\n", listen_socket, milliseconds_counter_g);
+      printf("Socket %d listening OK, time: %u\n", listen_socket, milliseconds_counter_g);
       #endif
 
       struct sockaddr_in client_addr;
       unsigned int addr_len = sizeof(client_addr);
       // Blocks here until a request
       int accept_socket = accept(listen_socket, (struct sockaddr *) &client_addr, &addr_len);
+
+      if ((xEventGroupGetBits(general_event_group_g) & UPDATE_FIRMWARE_FLAG) ||
+            (xEventGroupGetBits(general_event_group_g) & DELETE_TCP_SERVER_TASK_FLAG)) {
+         continue;
+      }
 
       if (accept_socket < 0) {
          #ifdef ALLOW_USE_PRINTF
@@ -483,43 +586,60 @@ static void tcp_server_task(void *pvParameters) {
       printf("Shutting down sockets %d and %d, restarting...\n", accept_socket, listen_socket);
       #endif
 
-      shutdown_and_close_socket(accept_socket);
-      shutdown_and_close_socket(listen_socket);
-      opened_sockets_g[0] = -1;
-      opened_sockets_g[1] = -1;
+      close_opened_sockets();
    }
 }
 
 static void pins_config() {
    gpio_config_t output_pins;
    output_pins.mode = GPIO_MODE_OUTPUT;
-   output_pins.pin_bit_mask = (1<<AP_CONNECTION_STATUS_LED_PIN) | (1<<SERVER_AVAILABILITY_STATUS_LED_PIN);
+   output_pins.pin_bit_mask = (1<<AP_CONNECTION_STATUS_LED_PIN) | (1<<SERVER_AVAILABILITY_STATUS_LED_PIN)
+         | (1<<RELAY_DOWN_PIN) | (1<<RELAY_UP_PIN);
    output_pins.pull_up_en = GPIO_PULLUP_DISABLE;
    output_pins.pull_down_en = GPIO_PULLDOWN_DISABLE;
 
    gpio_config(&output_pins);
+
+   gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
+   gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+   gpio_set_level(RELAY_DOWN_PIN, 0);
+   gpio_set_level(RELAY_UP_PIN, 0);
 }
 
 static void close_opened_sockets() {
    shutdown_and_close_socket(opened_sockets_g[0]);
+   opened_sockets_g[0] = -1;
    shutdown_and_close_socket(opened_sockets_g[1]);
+   opened_sockets_g[1] = -1;
 }
 
-static void on_wifi_connected() {
+void on_wifi_connected_task() {
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
    repetitive_ap_connecting_errors_counter_g = 0;
 
-   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, &tcp_server_task_handle_g);
+   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, NULL);
    send_status_info();
+
+   vTaskDelete(NULL);
 }
 
-static void on_wifi_disconnected() {
+void on_wifi_connected() {
+   xTaskCreate(on_wifi_connected_task, "on_wifi_connected_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+}
+
+void on_wifi_disconnected_task() {
    repetitive_ap_connecting_errors_counter_g++;
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
    gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
 
-   vTaskDelete(tcp_server_task_handle_g);
+   xEventGroupSetBits(general_event_group_g, DELETE_TCP_SERVER_TASK_FLAG);
    close_opened_sockets();
+
+   vTaskDelete(NULL);
+}
+
+void on_wifi_disconnected() {
+   xTaskCreate(on_wifi_disconnected_task, "on_wifi_disconnected_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 }
 
 static void blink_on_wifi_connection_task(void *pvParameters) {
@@ -527,7 +647,7 @@ static void blink_on_wifi_connection_task(void *pvParameters) {
    vTaskDelete(NULL);
 }
 
-static void blink_on_wifi_connection() {
+void blink_on_wifi_connection() {
    xTaskCreate(blink_on_wifi_connection_task, "blink_on_wifi_connection_task", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 }
 
@@ -573,6 +693,15 @@ void check_errors_amount() {
    }
 }
 
+static void execute_deferred_code(void *pvParameters) {
+   vTaskDelay(7000 / portTICK_RATE_MS);
+
+   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, &tcp_server_task_handle_g);
+   send_status_info();
+
+   vTaskDelete(NULL);
+}
+
 void app_main(void) {
    general_event_group_g = xEventGroupCreate();
 
@@ -583,13 +712,10 @@ void app_main(void) {
    vTaskDelay(3000 / portTICK_RATE_MS);
    stop_both_leds_blinking();
 
-   gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
-   gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
-
    #ifdef ALLOW_USE_PRINTF
    const esp_partition_t *running = esp_ota_get_running_partition();
-   printf("\nRunning partition type: label: %s, %d, subtype: %d, offset: 0x%X, size: 0x%X\n",
-         running->label, running->type, running->subtype, running->address, running->size);
+   printf("\nRunning partition type: label: %s, %d, subtype: %d, offset: 0x%X, size: 0x%X, build timestamp: %s\n",
+         running->label, running->type, running->subtype, running->address, running->size, __TIMESTAMP__);
    #endif
 
    tcpip_adapter_init();

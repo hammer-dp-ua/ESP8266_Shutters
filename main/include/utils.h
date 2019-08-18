@@ -17,7 +17,7 @@
 #include "sys/socket.h"
 
 #define HEXADECIMAL_ADDRESS_FORMAT "%08x"
-#define WI_FI_RECONNECTION_INTERVAL_MS (30 * 1000)
+#define WI_FI_RECONNECTION_INTERVAL_MS (10 * 1000)
 
 void *set_string_parameters(const char string[], const char *parameters[]);
 char *generate_post_request(char *request);
@@ -34,4 +34,5 @@ int get_request_content_length(char *request);
 char *get_request_payload(char *already_read_request_content_part, char *request, unsigned int *milliseconds_counter);
 void shutdown_and_close_socket(int socket);
 char *get_gson_element_value(char *json_string, char *json_element_to_find, bool *is_numeric_param, unsigned int *milliseconds_counter);
+void disable_wifi_event_handler();
 #endif

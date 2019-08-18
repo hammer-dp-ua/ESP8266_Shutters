@@ -137,41 +137,50 @@ char *put_flash_string_into_heap(const char *flash_string, unsigned int allocate
    return heap_string;
 }
 
+static void connect_to_ap() {
+   #ifdef ALLOW_USE_PRINTF
+   printf("\nConnect to AP...\n");
+   #endif
+
+   esp_wifi_connect();
+}
+
 static esp_err_t esp_event_handler(void *ctx, system_event_t *event) {
    switch(event->event_id) {
       case SYSTEM_EVENT_STA_START:
-         esp_wifi_connect();
-         on_wifi_connection();
-
          #ifdef ALLOW_USE_PRINTF
          printf("\nSYSTEM_EVENT_STA_START event\n");
          #endif
+
+         connect_to_ap();
+         on_wifi_connection();
+
+         break;
+      case SYSTEM_EVENT_STA_STOP:
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nSYSTEM_EVENT_STA_STOP event\n");
+         #endif
+
          break;
       case SYSTEM_EVENT_SCAN_DONE:
          #ifdef ALLOW_USE_PRINTF
-         printf("\nScan status: %u, amount: %u, scan id: %u",
+         printf("\nScan status: %u, amount: %u, scan id: %u\n",
                event->event_info.scan_done.status, event->event_info.scan_done.number, event->event_info.scan_done.scan_id);
          #endif
 
          break;
       case SYSTEM_EVENT_STA_GOT_IP:
          #ifdef ALLOW_USE_PRINTF
-         printf("Got IP: %s\n", ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
+         printf("\nGot IP: %s\n", ip4addr_ntoa(&event->event_info.got_ip.ip_info.ip));
          #endif
 
          os_timer_disarm(&wi_fi_reconnection_timer_g);
          xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
          on_wifi_connected();
          break;
-      case SYSTEM_EVENT_AP_STACONNECTED:
+      case SYSTEM_EVENT_STA_CONNECTED:
          #ifdef ALLOW_USE_PRINTF
          printf("\nStation: "MACSTR" join, AID=%d\n", MAC2STR(event->event_info.sta_connected.mac), event->event_info.sta_connected.aid);
-         #endif
-
-         break;
-      case SYSTEM_EVENT_AP_STADISCONNECTED:
-         #ifdef ALLOW_USE_PRINTF
-         printf("\nStation: "MACSTR" leave, AID=%d\n", MAC2STR(event->event_info.sta_disconnected.mac), event->event_info.sta_disconnected.aid);
          #endif
 
          break;
@@ -186,8 +195,9 @@ static esp_err_t esp_event_handler(void *ctx, system_event_t *event) {
          xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
 
          os_timer_disarm(&wi_fi_reconnection_timer_g);
-         os_timer_setfn(&wi_fi_reconnection_timer_g, (os_timer_func_t *) esp_wifi_connect, NULL);
+         os_timer_setfn(&wi_fi_reconnection_timer_g, (os_timer_func_t *) connect_to_ap, NULL);
          os_timer_arm(&wi_fi_reconnection_timer_g, WI_FI_RECONNECTION_INTERVAL_MS, true);
+
          break;
       default:
          break;
@@ -218,6 +228,10 @@ void wifi_init_sta(void (*on_connected)(), void (*on_disconnected)(), void (*on_
    #ifdef ALLOW_USE_PRINTF
    printf("\nwifi_init_sta finished\n");
    #endif
+}
+
+void disable_wifi_event_handler() {
+   esp_event_loop_set_cb(NULL, NULL);
 }
 
 bool is_connected_to_wifi() {
@@ -308,7 +322,6 @@ bool rtc_mem_write(unsigned short dst, const void *src, unsigned short length) {
       volatile unsigned int *rtc = ((unsigned int*)PERIPHS_RTC_BASEADDR) + dst + blocks;
       *rtc = *ram;
    }
-
    return true;
 }
 
@@ -331,7 +344,7 @@ int connect_to_http_server() {
       return -1;
    }
    #ifdef ALLOW_USE_PRINTF
-   printf("\nSocket %d has been allocated", socket_id);
+   printf("Socket %d has been allocated\n", socket_id);
    #endif
 
    struct sockaddr_in destination_address;
@@ -343,7 +356,7 @@ int connect_to_http_server() {
 
    if (connection_result != 0) {
       #ifdef ALLOW_USE_PRINTF
-      printf("\nSocket connection failed. Error: %d", connection_result);
+      printf("\nSocket connection failed. Error: %d\n", connection_result);
       #endif
 
       close(socket_id);
@@ -351,7 +364,7 @@ int connect_to_http_server() {
    }
 
    #ifdef ALLOW_USE_PRINTF
-   printf("\nSocket %d has been connected", socket_id);
+   printf("Socket %d has been connected\n", socket_id);
    #endif
    return socket_id;
 }
@@ -371,7 +384,7 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
    assert(final_response_result != NULL);
 
    for (;;) {
-      int send_result = send(socket_id, request, strlen(request), 0);
+      int send_result = write(socket_id, request, strlen(request));
 
       if (send_result < 0) {
          #ifdef ALLOW_USE_PRINTF
@@ -381,25 +394,27 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
          break;
       }
       #ifdef ALLOW_USE_PRINTF
-      printf("\nRequest has been sent. Socket: %d, time: %u\n", socket_id, *milliseconds_counter);
+      printf("Request has been sent. Socket: %d, time: %u\n", socket_id, *milliseconds_counter);
       #endif
 
       unsigned char tmp_buffer_size = response_buffer_size <= 255 ? response_buffer_size : 255;
       char tmp_buffer[tmp_buffer_size];
-      int len = recv(socket_id, tmp_buffer, tmp_buffer_size - 1, 0);
-      tmp_buffer[len] = '\0';
+      int len = read(socket_id, tmp_buffer, tmp_buffer_size - 1);
 
       if (len < 0) {
          #ifdef ALLOW_USE_PRINTF
          printf("\nReceive failed. Error no.: %d, time: %u\n", len, *milliseconds_counter);
          #endif
 
+         FREE(final_response_result);
+         final_response_result = NULL;
+
          break;
       } else if (len == 0) {
-         final_response_result[received_bytes_amount] = '\0';
+         final_response_result[received_bytes_amount] = 0;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("Final response: %s, time: %u\n", final_response_result, *milliseconds_counter);
+         printf("Final response: %s\nlength: %u, time: %u\n", final_response_result, received_bytes_amount, *milliseconds_counter);
          #endif
 
          break;
@@ -417,11 +432,12 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
 
             *(final_response_result + addend) = tmp_buffer[i];
          }
+         tmp_buffer[len] = 0;
          received_bytes_amount += max_length_exceed ? 0 : len;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("Received %d bytes, time: %u\n", len, *milliseconds_counter);
-         printf("Response: %s\n", tmp_buffer);
+         //printf("Received %d bytes, time: %u\n", len, *milliseconds_counter);
+         //printf("Response: %s\n", tmp_buffer);
          #endif
       }
    }
@@ -430,9 +446,7 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
    printf("Shutting down socket and restarting...\n");
    #endif
 
-   shutdown(socket_id, 0);
-   close(socket_id);
-
+   shutdown_and_close_socket(socket_id);
    return final_response_result;
 }
 
@@ -545,7 +559,7 @@ char *get_gson_element_value(char *json_string, char *json_element_to_find, bool
 
 void shutdown_and_close_socket(int socket) {
    if (socket >= 0) {
-      shutdown(socket, 0);
+      shutdown(socket, SHUT_RDWR);
       close(socket);
    }
 }

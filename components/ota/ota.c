@@ -13,7 +13,7 @@ static os_timer_t upgrade_timer;
 
 static void __attribute__((noreturn)) task_fatal_error() {
    #ifdef ALLOW_USE_PRINTF
-   printf("Exiting task due to fatal error...");
+   printf("\nExiting task due to fatal error...\n");
    #endif
 
    close(socket_id);
@@ -30,7 +30,7 @@ static void esp_ota_firm_init(esp_ota_firm_t *ota_firm, const esp_partition_t *u
    ota_firm->update_ota_num = update_partition->subtype - ESP_PARTITION_SUBTYPE_APP_OTA_0;
 
    #ifdef ALLOW_USE_PRINTF
-   printf("Total OTA number %d update to %d part", ota_firm->ota_num, ota_firm->update_ota_num);
+   printf("Total OTA number %d update to %d part\n", ota_firm->ota_num, ota_firm->update_ota_num);
    #endif
 }
 
@@ -66,7 +66,7 @@ static bool _esp_ota_firm_parse_http(esp_ota_firm_t *ota_firm, const char *text,
          ota_firm->ota_offset = 0;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("Parse Content-Length: %d, ota_size %d", ota_firm->content_len, ota_firm->ota_size);
+         printf("Parse Content-Length: %d, ota_size %d\n", ota_firm->content_len, ota_firm->ota_size);
          #endif
       }
 
@@ -74,7 +74,7 @@ static bool _esp_ota_firm_parse_http(esp_ota_firm_t *ota_firm, const char *text,
 
       if (i_read_len > total_len - i) {
          #ifdef ALLOW_USE_PRINTF
-         printf("recv. malformed HTTP header");
+         printf("\nrecv. malformed HTTP header\n");
          #endif
 
          task_fatal_error();
@@ -84,7 +84,7 @@ static bool _esp_ota_firm_parse_http(esp_ota_firm_t *ota_firm, const char *text,
       if (i_read_len == 2) {
          if (ota_firm->content_len == 0) {
             #ifdef ALLOW_USE_PRINTF
-            printf("Did not parse Content-Length item");
+            printf("\nDid not parse Content-Length item\n");
             #endif
 
             task_fatal_error();
@@ -158,7 +158,7 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
          parsed_bytes = 0;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("State is %d", ota_firm->state);
+         printf("\nState is %d\n", ota_firm->state);
          #endif
 
          break;
@@ -210,7 +210,7 @@ static void update_firmware_task(void *pvParameter) {
    const esp_partition_t *update_partition = NULL;
 
    #ifdef ALLOW_USE_PRINTF
-   printf("Starting OTA... Flash: %s", CONFIG_ESPTOOLPY_FLASHSIZE);
+   printf("\nStarting OTA... Flash: %s\n", CONFIG_ESPTOOLPY_FLASHSIZE);
    #endif
 
    /*const esp_partition_t *configured = esp_ota_get_boot_partition();
@@ -228,7 +228,7 @@ static void update_firmware_task(void *pvParameter) {
    char *http_request = set_string_parameters(FIRMWARE_UPDATE_GET_REQUEST, request_parameters);
 
    #ifdef ALLOW_USE_PRINTF
-   printf("GET HTTP request: %s", http_request);
+   printf("GET HTTP request: %s\n", http_request);
    #endif
 
    socket_id = connect_to_http_server();
@@ -237,7 +237,7 @@ static void update_firmware_task(void *pvParameter) {
       free(http_request);
 
       #ifdef ALLOW_USE_PRINTF
-      printf("Error on server connection for updating");
+      printf("\nError on server connection for updating\n");
       #endif
 
       task_fatal_error();
@@ -249,13 +249,13 @@ static void update_firmware_task(void *pvParameter) {
 
    if (res < 0) {
       #ifdef ALLOW_USE_PRINTF
-      printf("Send GET request to server failed");
+      printf("\nSend GET request to server failed\n");
       #endif
 
       task_fatal_error();
    } else {
       #ifdef ALLOW_USE_PRINTF
-      printf("Send GET request to server succeeded");
+      printf("Send GET request to server succeeded\n");
       #endif
    }
 
@@ -263,20 +263,20 @@ static void update_firmware_task(void *pvParameter) {
    assert(update_partition != NULL);
 
    #ifdef ALLOW_USE_PRINTF
-   printf("Writing to partition subtype %d at offset 0x%X", update_partition->subtype, update_partition->address);
+   printf("Writing to partition subtype %d at offset 0x%X\n", update_partition->subtype, update_partition->address);
    #endif
 
    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
 
    if (err != ESP_OK) {
       #ifdef ALLOW_USE_PRINTF
-      printf("esp_ota_begin failed, error=%d", err);
+      printf("\nesp_ota_begin failed, error=%d\n", err);
       #endif
 
       task_fatal_error();
    }
    #ifdef ALLOW_USE_PRINTF
-   printf("esp_ota_begin succeeded");
+   printf("esp_ota_begin succeeded\n");
    #endif
 
    bool flag = true;
@@ -293,7 +293,7 @@ static void update_firmware_task(void *pvParameter) {
 
       if (buff_len < 0) { // receive error
          #ifdef ALLOW_USE_PRINTF
-         printf("Error: receive data error! Error no.=%d", errno);
+         printf("\nError: receive data error! Error no.=%d\n", errno);
          #endif
 
          task_fatal_error();
@@ -311,7 +311,7 @@ static void update_firmware_task(void *pvParameter) {
 
          if (err != ESP_OK) {
             #ifdef ALLOW_USE_PRINTF
-            printf("Error: esp_ota_write failed! err=0x%X", err);
+            printf("\nError: esp_ota_write failed! err=0x%X\n", err);
             #endif
 
             task_fatal_error();
@@ -323,13 +323,13 @@ static void update_firmware_task(void *pvParameter) {
          flag = false;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("Connection closed, all packets received");
+         printf("Connection closed, all packets received\n");
          #endif
 
-         close(socket_id);
+         shutdown_and_close_socket(socket_id);
       } else {
          #ifdef ALLOW_USE_PRINTF
-         printf("Unexpected recv. result");
+         printf("\nUnexpected recv. result\n");
          #endif
       }
 
@@ -339,12 +339,12 @@ static void update_firmware_task(void *pvParameter) {
    }
 
    #ifdef ALLOW_USE_PRINTF
-   printf("Total write binary data length : %d", binary_file_length);
+   printf("Total write binary data length: %d\n", binary_file_length);
    #endif
 
    if (esp_ota_end(update_handle) != ESP_OK) {
       #ifdef ALLOW_USE_PRINTF
-      printf("esp_ota_end failed!");
+      printf("\nesp_ota_end failed!\n");
       #endif
 
       task_fatal_error();
@@ -354,14 +354,14 @@ static void update_firmware_task(void *pvParameter) {
 
    if (err != ESP_OK) {
       #ifdef ALLOW_USE_PRINTF
-      printf("esp_ota_set_boot_partition failed! err=0x%X", err);
+      printf("\nesp_ota_set_boot_partition failed! err=0x%X\n", err);
       #endif
 
       task_fatal_error();
    }
 
    #ifdef ALLOW_USE_PRINTF
-   printf("Prepare to restart system!");
+   printf("Prepare to restart system!\n");
    #endif
 
    esp_restart();
@@ -369,16 +369,19 @@ static void update_firmware_task(void *pvParameter) {
 
 static void on_update_timeout() {
    #ifdef ALLOW_USE_PRINTF
-   printf("Update timeout");
+   printf("\nUpdate timeout\n");
    #endif
 
    esp_restart();
 }
 
 void update_firmware() {
+   // Resolves an exception error when calling esp_restart() in the end of updating
+   disable_wifi_event_handler();
+
    os_timer_disarm(&upgrade_timer);
    os_timer_setfn(&upgrade_timer, (os_timer_func_t *) on_update_timeout, NULL);
    os_timer_arm(&upgrade_timer, 300000, false);
 
-   xTaskCreate(update_firmware_task, "update_firmware_task", configMINIMAL_STACK_SIZE * 7, NULL, 5, NULL);
+   xTaskCreate(update_firmware_task, "update_firmware_task", configMINIMAL_STACK_SIZE * 6, NULL, 5, NULL);
 }
