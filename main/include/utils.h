@@ -26,8 +26,8 @@ char *put_flash_string_into_heap(const char *flash_string, unsigned int allocate
 char *generate_reset_reason();
 void wifi_init_sta(void (*on_connected)(), void (*on_disconnected)(), void (*on_connection)());
 bool is_connected_to_wifi();
-bool rtc_mem_read(unsigned short addr, void *dst, unsigned short length);
-bool rtc_mem_write(unsigned short dst, const void *src, unsigned short length);
+void rtc_mem_read(unsigned short addr, void *dst, unsigned short length);
+void rtc_mem_write(unsigned short dst, const void *src, unsigned short length);
 int connect_to_http_server();
 char *send_request(char *request, unsigned short response_buffer_length, unsigned int *milliseconds_counter);
 int get_request_content_length(char *request);

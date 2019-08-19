@@ -15,7 +15,7 @@ static unsigned short errors_counter_g = 0;
 static unsigned short repetitive_request_errors_counter_g = 0;
 static unsigned char pending_connection_errors_counter_g;
 static unsigned int repetitive_ap_connecting_errors_counter_g = 0;
-static int connection_error_code_g;
+static unsigned int repetitive_tcp_server_errors_counter_g = 0;
 
 static int opened_sockets_g[2];
 
@@ -29,8 +29,6 @@ static os_timer_t blink_on_shutters_activity_g;
 static EventGroupHandle_t general_event_group_g;
 
 static SemaphoreHandle_t wirelessNetworkActionsSemaphore_g;
-
-static TaskHandle_t tcp_server_task_handle_g;
 
 static void milliseconds_counter() {
    milliseconds_counter_g++;
@@ -100,11 +98,14 @@ static void blink_both_leds() {
 static void start_both_leds_blinking() {
    os_timer_disarm(&blink_both_leds_g);
    os_timer_setfn(&blink_both_leds_g, (os_timer_func_t *) blink_both_leds, NULL);
-   os_timer_arm(&blink_both_leds_g, 2000 / MILLISECONDS_COUNTER_DIVIDER, true); // 100 ms
+   os_timer_arm(&blink_both_leds_g, 2000 / MILLISECONDS_COUNTER_DIVIDER, true); // 200 ms
 }
 
 static void stop_both_leds_blinking() {
    os_timer_disarm(&blink_both_leds_g);
+
+   gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
+   gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
 }
 
 static void blink_on_send(gpio_num_t pin) {
@@ -222,10 +223,6 @@ void send_status_info_task(void *pvParameters) {
       } else if (system_restart_reason_type == SOFTWARE_UPGRADE) {
          system_restart_reason = "Software upgrade";
       }
-
-      unsigned int overwrite_value = 0xFFFF;
-      rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &overwrite_value, 4);
-      rtc_mem_write(CONNECTION_ERROR_CODE_RTC_ADDRESS, &overwrite_value, 4);
    }
 
    const char *request_payload_template_parameters[] =
@@ -261,6 +258,9 @@ void send_status_info_task(void *pvParameters) {
 
          if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
             xEventGroupSetBits(general_event_group_g, FIRST_STATUS_INFO_SENT_FLAG);
+
+            unsigned int overwrite_value = 0xFFFF;
+            rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &overwrite_value, 4);
          }
 
          #ifdef ALLOW_USE_PRINTF
@@ -321,9 +321,9 @@ static void start_blinking_on_shutters_opening() {
 
 static void blink_on_shutters_closing() {
    if (gpio_get_level(SERVER_AVAILABILITY_STATUS_LED_PIN)) {
-      gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
-   } else {
       gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+   } else {
+      gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
    }
 }
 
@@ -340,6 +340,7 @@ static void stop_blinking_on_shutters_activity() {
 
    if (is_connected_to_wifi()) {
       gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
+      gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 1);
    }
 }
 
@@ -372,8 +373,6 @@ static void process_request_and_send_response(char *request_payload, int socket)
    printf("All data received\n");
    #endif
 
-   blink_on_send(SERVER_AVAILABILITY_STATUS_LED_PIN);
-
    char *response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
    int sent = write(socket, response, strlen(response));
 
@@ -381,6 +380,8 @@ static void process_request_and_send_response(char *request_payload, int socket)
       #ifdef ALLOW_USE_PRINTF
       printf("\nError occurred during sending\n");
       #endif
+
+      repetitive_tcp_server_errors_counter_g++;
    } else {
       #ifdef ALLOW_USE_PRINTF
       printf("Sent %d bytes\n", sent);
@@ -430,7 +431,7 @@ static void process_request_and_send_response(char *request_payload, int socket)
 }
 
 static void tcp_server_task(void *pvParameters) {
-   for (;;) {
+   while (true) {
       if ((xEventGroupGetBits(general_event_group_g) & UPDATE_FIRMWARE_FLAG) ||
             (xEventGroupGetBits(general_event_group_g) & DELETE_TCP_SERVER_TASK_FLAG)) {
          // If some request is receipted during update
@@ -439,8 +440,16 @@ static void tcp_server_task(void *pvParameters) {
          #endif
 
          xEventGroupClearBits(general_event_group_g, DELETE_TCP_SERVER_TASK_FLAG);
-
          vTaskDelete(NULL);
+      }
+
+      if (!is_connected_to_wifi()) {
+         #ifdef ALLOW_USE_PRINTF
+         printf("\nNot connected to AP for TCP server, time: %u\n", milliseconds_counter_g);
+         #endif
+
+         vTaskDelay(2000 / portTICK_RATE_MS);
+         continue;
       }
 
       int listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
@@ -450,7 +459,8 @@ static void tcp_server_task(void *pvParameters) {
          printf("\nError on socket opening, time: %u\n", milliseconds_counter_g);
          #endif
 
-         vTaskDelay(1000 / portTICK_RATE_MS);
+         repetitive_tcp_server_errors_counter_g++;
+         vTaskDelay(2000 / portTICK_RATE_MS);
          continue;
       }
 
@@ -474,7 +484,8 @@ static void tcp_server_task(void *pvParameters) {
 
          shutdown_and_close_socket(listen_socket);
          opened_sockets_g[0] = -1;
-         vTaskDelay(1000 / portTICK_RATE_MS);
+         repetitive_tcp_server_errors_counter_g++;
+         vTaskDelay(2000 / portTICK_RATE_MS);
          continue;
       }
 
@@ -491,7 +502,8 @@ static void tcp_server_task(void *pvParameters) {
 
          shutdown_and_close_socket(listen_socket);
          opened_sockets_g[0] = -1;
-         vTaskDelay(1000 / portTICK_RATE_MS);
+         repetitive_tcp_server_errors_counter_g++;
+         vTaskDelay(2000 / portTICK_RATE_MS);
          continue;
       }
 
@@ -515,7 +527,8 @@ static void tcp_server_task(void *pvParameters) {
          #endif
 
          shutdown_and_close_socket(listen_socket);
-         vTaskDelay(1000 / portTICK_RATE_MS);
+         repetitive_tcp_server_errors_counter_g++;
+         vTaskDelay(2000 / portTICK_RATE_MS);
          continue;
       }
       opened_sockets_g[1] = accept_socket;
@@ -541,6 +554,7 @@ static void tcp_server_task(void *pvParameters) {
             printf("\nReceive failed. Error no.: %d, time: %u\n", received_bytes, milliseconds_counter_g);
             #endif
 
+            repetitive_tcp_server_errors_counter_g++;
             break;
          } else if (received_bytes == 0) {
             #ifdef ALLOW_USE_PRINTF
@@ -587,6 +601,7 @@ static void tcp_server_task(void *pvParameters) {
       #endif
 
       close_opened_sockets();
+      repetitive_tcp_server_errors_counter_g = 0;
    }
 }
 
@@ -675,7 +690,6 @@ void check_errors_amount() {
       SYSTEM_RESTART_REASON_TYPE system_restart_reason_type = REQUEST_CONNECTION_ERROR;
 
       rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &system_restart_reason_type, 4);
-      rtc_mem_write(CONNECTION_ERROR_CODE_RTC_ADDRESS, &connection_error_code_g, 4);
       restart = true;
    } else if (repetitive_ap_connecting_errors_counter_g >= MAX_REPETITIVE_ALLOWED_ERRORS_AMOUNT) {
       #ifdef ALLOW_USE_PRINTF
@@ -686,20 +700,20 @@ void check_errors_amount() {
 
       rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &system_restart_reason_type, 4);
       restart = true;
+   } else if (repetitive_tcp_server_errors_counter_g >= MAX_REPETITIVE_ALLOWED_ERRORS_AMOUNT + 10) {
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nTCP server errors amount: %u\n", repetitive_ap_connecting_errors_counter_g);
+      #endif
+
+      SYSTEM_RESTART_REASON_TYPE system_restart_reason_type = TCP_SERVER_ERROR;
+
+      rtc_mem_write(SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS, &system_restart_reason_type, 4);
+      restart = true;
    }
 
    if (restart) {
       esp_restart();
    }
-}
-
-static void execute_deferred_code(void *pvParameters) {
-   vTaskDelay(7000 / portTICK_RATE_MS);
-
-   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, &tcp_server_task_handle_g);
-   send_status_info();
-
-   vTaskDelete(NULL);
 }
 
 void app_main(void) {

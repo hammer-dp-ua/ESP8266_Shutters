@@ -110,7 +110,7 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
             ota_firm->state = ESP_OTA_PREPARE;
 
             #ifdef ALLOW_USE_PRINTF
-            //printf("HTTP parsed %d bytes", tmp);
+            printf("HTTP parsed %d bytes", tmp);
             #endif
 
             parsed_bytes = tmp;
@@ -127,8 +127,8 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
             ota_firm->state = ESP_OTA_START;
 
             #ifdef ALLOW_USE_PRINTF
-            //printf("Received %d bytes and start to update", ota_firm->read_bytes);
-            //printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
+            printf("Received %d bytes and start to update", ota_firm->read_bytes);
+            printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
             #endif
          }
 
@@ -145,7 +145,7 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
          ota_firm->write_bytes += ota_firm->bytes;
 
          #ifdef ALLOW_USE_PRINTF
-         //printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
+         printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
          #endif
 
          break;
