@@ -253,7 +253,7 @@ bool is_connected_to_wifi() {
   * @param     void *dst :                data pointer
   * @param     unsigned short length :    data length, unit: byte
   */
-void rtc_mem_read(unsigned short src_block, void *dst, unsigned short length) {
+void rtc_mem_read(unsigned int src_block, void *dst, unsigned int length) {
    // validate reading a user block
    assert(src_block >= 64);
    assert(src_block);
@@ -266,13 +266,15 @@ void rtc_mem_read(unsigned short src_block, void *dst, unsigned short length) {
    assert(length <= ((256 + 512) - (src_block * 4)));
 
    // copy the data
-   for (short blocks = (length >> 2) - 1; blocks >= 0; blocks--) {
-      volatile unsigned int *ram = ((unsigned int *) dst) + blocks;
-      volatile unsigned int *rtc = ((unsigned int *) PERIPHS_RTC_BASEADDR) + src_block + blocks;
-      *ram = *rtc;
+   for (unsigned int read_bytes = 0; read_bytes < length; read_bytes += 4) {
+      uint32_t *ram = (uint32_t *) (dst + read_bytes);
+      uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (src_block * 4) + read_bytes);
+      *ram = READ_PERI_REG(rtc);
 
       #ifdef ALLOW_USE_PRINTF
-      printf("\nValue read from 0x%X RTC address is 0x%X\n", (unsigned int) rtc, *rtc);
+      printf("\nRead from RTC address 0x%X to 0x%X\n", (unsigned int) rtc, (unsigned int) ram);
+      printf("Content of RTC: 0x%X\n", *rtc);
+      printf("Value from RAM: 0x%X, reminder of 4 for memory address: %u\n", *ram, ((unsigned int) ram) % 4);
       #endif
    }
 }
@@ -294,7 +296,7 @@ void rtc_mem_read(unsigned short src_block, void *dst, unsigned short length) {
   * @param     const void *src :          data pointer
   * @param     unsigned short length :    data length, unit: byte
   */
-void rtc_mem_write(unsigned short dst_block, const void *src, unsigned short length) {
+void rtc_mem_write(unsigned int dst_block, const void *src, unsigned int length) {
    // validate writing a user block
    assert(dst_block >= 64);
    assert(dst_block < (256 * 512 / 4));
@@ -307,13 +309,15 @@ void rtc_mem_write(unsigned short dst_block, const void *src, unsigned short len
    assert(length <= ((256 + 512) - (dst_block * 4)));
 
    // copy the data
-   for (short blocks = (length >> 2) - 1; blocks >= 0; blocks--) {
-      volatile unsigned int *ram = ((unsigned int *) src) + blocks;
-      volatile unsigned int *rtc = ((unsigned int *) PERIPHS_RTC_BASEADDR) + dst_block + blocks;
-      *rtc = *ram;
+   for (unsigned int read_bytes = 0; read_bytes < length; read_bytes += 4) {
+      uint32_t *ram = (uint32_t *) (src + read_bytes);
+      uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (dst_block * 4) + read_bytes);
+      WRITE_PERI_REG(rtc, *ram);
 
       #ifdef ALLOW_USE_PRINTF
-      printf("\nValue written to 0x%X RTC address is 0x%X\n", (unsigned int) rtc, *ram);
+      printf("\nWritten to RTC address 0x%X from 0x%X\n", (unsigned int) rtc, (unsigned int) ram);
+      printf("Value from RAM: 0x%X, reminder of 4 for memory address: %u\n", *ram, ((unsigned int) ram) % 4);
+      printf("Validation of RTC memory: 0x%X\n", READ_PERI_REG(rtc));
       #endif
    }
 }

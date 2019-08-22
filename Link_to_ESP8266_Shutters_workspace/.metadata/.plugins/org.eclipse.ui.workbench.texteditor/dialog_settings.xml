@@ -2,20 +2,20 @@
 <section name="Workbench">
 	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
 		<item value="false" key="isRegEx"/>
-		<item value="send_request" key="selection"/>
+		<item value="PERIPHS_RTC_BASEADDR" key="selection"/>
 		<item value="false" key="casesensitive"/>
 		<item value="false" key="incremental"/>
 		<item value="true" key="wrap"/>
 		<item value="false" key="wholeword"/>
 		<list key="findhistory">
-			<item value="send_request"/>
-			<item value="invocation_time"/>
-			<item value="status_sender_timer_g"/>
-			<item value="UART_BUF_SIZE"/>
-			<item value="MILLISECONDS_COUNTER_DIVIDER"/>
-			<item value="ERRORS_CHECKER_INTERVAL_MS"/>
-			<item value="STATUS_REQUESTS_SEND_INTERVAL_MS"/>
-			<item value="REQUEST_MAX_DURATION_TIME"/>
+			<item value="PERIPHS_RTC_BASEADDR"/>
+			<item value="PERIPHS_WDT_BASEADDR"/>
+			<item value="strstr"/>
+			<item value="offset"/>
+			<item value="Write"/>
+			<item value="tcp_server_task"/>
+			<item value="memcpy"/>
+			<item value="~~~"/>
 		</list>
 		<list key="replacehistory">
 			<item value="rtc_mem_write"/>
@@ -26,7 +26,7 @@
 		<item value="284" key="DIALOG_WIDTH"/>
 		<item value="1|Segoe UI|9.0|0|WINDOWS|1|-12|0|0|0|400|0|0|0|1|0|0|0|0|Segoe UI" key="DIALOG_FONT_NAME"/>
 		<item value="391" key="DIALOG_HEIGHT"/>
-		<item value="1292" key="DIALOG_X_ORIGIN"/>
+		<item value="1224" key="DIALOG_X_ORIGIN"/>
 		<item value="132" key="DIALOG_Y_ORIGIN"/>
 	</section>
 </section>

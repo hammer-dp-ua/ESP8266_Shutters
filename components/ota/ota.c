@@ -17,9 +17,7 @@ static void __attribute__((noreturn)) task_fatal_error() {
    #endif
 
    close(socket_id);
-   (void) vTaskDelete(NULL);
-
-   while (1) {}
+   esp_restart();
 }
 
 static void esp_ota_firm_init(esp_ota_firm_t *ota_firm, const esp_partition_t *update_partition) {
@@ -110,7 +108,7 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
             ota_firm->state = ESP_OTA_PREPARE;
 
             #ifdef ALLOW_USE_PRINTF
-            printf("HTTP parsed %d bytes", tmp);
+            //printf("HTTP parsed %d bytes", tmp);
             #endif
 
             parsed_bytes = tmp;
@@ -127,8 +125,8 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
             ota_firm->state = ESP_OTA_START;
 
             #ifdef ALLOW_USE_PRINTF
-            printf("Received %d bytes and start to update", ota_firm->read_bytes);
-            printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
+            //printf("Received %d bytes and start to update\n", ota_firm->read_bytes);
+            //printf("Write %d total %d\n", ota_firm->bytes, ota_firm->write_bytes);
             #endif
          }
 
@@ -145,7 +143,7 @@ static size_t esp_ota_firm_do_parse_msg(esp_ota_firm_t *ota_firm, const char *in
          ota_firm->write_bytes += ota_firm->bytes;
 
          #ifdef ALLOW_USE_PRINTF
-         printf("Write %d total %d", ota_firm->bytes, ota_firm->write_bytes);
+         //printf("Write %d total %d\n", ota_firm->bytes, ota_firm->write_bytes);
          #endif
 
          break;
@@ -207,24 +205,33 @@ static void update_firmware_task(void *pvParameter) {
    esp_err_t err;
    // update handle : set by esp_ota_begin(), must be freed via esp_ota_end()
    esp_ota_handle_t update_handle = 0;
-   const esp_partition_t *update_partition = NULL;
 
    #ifdef ALLOW_USE_PRINTF
    printf("\nStarting OTA... Flash: %s\n", CONFIG_ESPTOOLPY_FLASHSIZE);
    #endif
 
-   /*const esp_partition_t *configured = esp_ota_get_boot_partition();
-   assert(configured != NULL);
-   const esp_partition_t *running = esp_ota_get_running_partition();
-   assert(running != NULL);
+   const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+   assert(update_partition != NULL);
 
-   if (configured != running) {
-      ESP_LOGI(TAG, "Configured OTA boot partition at offset 0x%X, but running from offset 0x%X", configured->address, running->address);
-      ESP_LOGI(TAG, "(This can happen if either the OTA boot data or preferred boot image become corrupted somehow.)");
+   #ifdef ALLOW_USE_PRINTF
+   printf("Writing to partition label %s at offset 0x%X, subtype: 0x%X, size: 0x%X\n",
+         update_partition->label, update_partition->address, update_partition->subtype, update_partition->size);
+   #endif
+
+   const char *request_parameters[] = {"", SERVER_IP_ADDRESS, NULL};
+
+   if (strcasecmp(update_partition->label, "ota_0") == 0) {
+      request_parameters[0] = "firmware.app1.bin";
+   } else if (strcasecmp(update_partition->label, "ota_1") == 0) {
+      request_parameters[0] = "firmware.app2.bin";
+   } else {
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nIllegal partition label: %s\n", update_partition->label);
+      #endif
+
+      task_fatal_error();
    }
-   ESP_LOGI(TAG, "Running partition type 0x%X subtype 0x%X (offset 0x%X)", running->type, running->subtype, running->address);*/
 
-   const char *request_parameters[] = {"firmware.bin", SERVER_IP_ADDRESS, NULL};
    char *http_request = set_string_parameters(FIRMWARE_UPDATE_GET_REQUEST, request_parameters);
 
    #ifdef ALLOW_USE_PRINTF
@@ -258,13 +265,6 @@ static void update_firmware_task(void *pvParameter) {
       printf("Send GET request to server succeeded\n");
       #endif
    }
-
-   update_partition = esp_ota_get_next_update_partition(NULL);
-   assert(update_partition != NULL);
-
-   #ifdef ALLOW_USE_PRINTF
-   printf("Writing to partition subtype %d at offset 0x%X\n", update_partition->subtype, update_partition->address);
-   #endif
 
    err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &update_handle);
 
