@@ -26,3 +26,5 @@
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.ltk.core.refactoring
 /Link_to_ESP8266_Shutters_workspace/.metadata/*.log
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.root/*.tree
+/Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.ui.workbench.texteditor
+/Link_to_ESP8266_Shutters_workspace/.metadata/version.ini
