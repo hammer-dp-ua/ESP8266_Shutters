@@ -368,7 +368,7 @@ static void close_shutters(unsigned char closing_time_sec) {
    start_blinking_on_shutters_closing();
 }
 
-static void process_request_and_send_response(char *request_payload, int socket) {
+static void process_request_and_send_response(char *request, int socket) {
    #ifdef ALLOW_USE_PRINTF
    printf("All data received\n");
    #endif
@@ -389,7 +389,7 @@ static void process_request_and_send_response(char *request_payload, int socket)
    }
 
    bool is_numeric_value = false;
-   char *opening_activity_duration = get_gson_element_value(request_payload, "open", &is_numeric_value, &milliseconds_counter_g);
+   char *opening_activity_duration = get_value_of_get_request_parameter(request, "open", &is_numeric_value, &milliseconds_counter_g);
 
    #ifdef ALLOW_USE_PRINTF
    printf("Value of JSON 'open':%s, is numeric: %s\n", opening_activity_duration, (is_numeric_value ? "true" : "false"));
@@ -407,7 +407,7 @@ static void process_request_and_send_response(char *request_payload, int socket)
       FREE(opening_activity_duration);
    }
 
-   char *closing_activity_duration = get_gson_element_value(request_payload, "close", &is_numeric_value, &milliseconds_counter_g);
+   char *closing_activity_duration = get_value_of_get_request_parameter(request, "close", &is_numeric_value, &milliseconds_counter_g);
 
    #ifdef ALLOW_USE_PRINTF
    printf("Value of JSON 'close':%s, is numeric: %s\n", closing_activity_duration, (is_numeric_value ? "true" : "false"));
@@ -423,10 +423,6 @@ static void process_request_and_send_response(char *request_payload, int socket)
       }
 
       FREE(closing_activity_duration);
-   }
-
-   if (request_payload != NULL) {
-      FREE(request_payload);
    }
 }
 
@@ -537,10 +533,9 @@ static void tcp_server_task(void *pvParameters) {
       printf("\nSocket %d accepted\n", accept_socket);
       #endif
 
+      // Buffer size should always be enough, because for GET requests only the beginning of requests is required
       unsigned short rx_buffer_size = 300;
       char rx_buffer[rx_buffer_size];
-      int request_content_length = -1;
-      char *request_payload = NULL;
 
       while (true) {
          #ifdef ALLOW_USE_PRINTF
@@ -557,11 +552,6 @@ static void tcp_server_task(void *pvParameters) {
             repetitive_tcp_server_errors_counter_g++;
             break;
          } else if (received_bytes == 0) {
-            #ifdef ALLOW_USE_PRINTF
-            printf("All data received\n");
-            #endif
-
-            process_request_and_send_response(request_payload, accept_socket);
             break;
          } else {
             rx_buffer[received_bytes] = 0; // Null-terminate whatever we received and treat like a string
@@ -573,26 +563,7 @@ static void tcp_server_task(void *pvParameters) {
             printf("Content: %s\n", rx_buffer);
             #endif
 
-            if (request_content_length < 0) {
-               request_content_length = get_request_content_length(rx_buffer);
-
-               #ifdef ALLOW_USE_PRINTF
-               printf("Request payload length: %d\n", request_content_length);
-               #endif
-            }
-
-            if (request_content_length > 0) {
-               request_payload = get_request_payload(request_payload, rx_buffer, &milliseconds_counter_g);
-
-               #ifdef ALLOW_USE_PRINTF
-               printf("Request payload: %s\n", request_payload);
-               #endif
-            }
-
-            if (received_bytes < rx_buffer_size - 1) {
-               process_request_and_send_response(request_payload, accept_socket);
-               break;
-            }
+            process_request_and_send_response(rx_buffer, accept_socket);
          }
       }
 

@@ -1,19 +1,6 @@
 /build
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.history
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.projects/ESP8266_Shutters/.indexes
-/_Makefile
-/compile4096.bat
-/first_build_config.bat
 /sdkconfig.old
 /RemoteSystemsTempFiles
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.projects/RemoteSystemsTempFiles
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.root
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.ltk.core.refactoring
-/Link to ESP8266_Shutters_workspace/.metadata/*.log
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.cdt.core/*.log
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.cdt.ui/*.log
-/Link to ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.core.resources/.projects/ESP8266_Shutters/*.snap
-/Link to ESP8266_Shutters_workspace/.metadata/version.ini
 /main/include/device_settings.h
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.rse.core/*.log
 /Link_to_ESP8266_Shutters_workspace/.metadata/.plugins/org.eclipse.cdt.core/*.log

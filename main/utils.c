@@ -100,43 +100,6 @@ void *set_string_parameters(const char string[], const char *parameters[]) {
    return allocated_result;
 }
 
-bool compare_strings(char *string1, char *string2) {
-   if (string1 == NULL || string2 == NULL) {
-      return false;
-   }
-
-   bool result = true;
-   unsigned short i = 0;
-
-   while (result) {
-      char string1_character = *(string1 + i);
-      char string2_character = *(string2 + i);
-
-      if (string1_character == '\0' && string2_character == '\0') {
-         break;
-      } else if (string1_character == '\0' || string2_character == '\0' || string1_character != string2_character) {
-         result = false;
-      }
-      i++;
-   }
-   return result;
-}
-
-char *put_flash_string_into_heap(const char *flash_string, unsigned int allocated_time) {
-   assert(flash_string != NULL);
-
-   unsigned short string_length = strlen(flash_string);
-
-   char *heap_string = MALLOC(string_length + 1, allocated_time);
-   assert(heap_string != NULL);
-
-   for (unsigned short i = 0; i < string_length; i++) {
-      *(heap_string + i) = flash_string[i];
-   }
-   *(heap_string + string_length) = '\0';
-   return heap_string;
-}
-
 static void connect_to_ap() {
    #ifdef ALLOW_USE_PRINTF
    printf("\nConnect to AP...\n");
@@ -144,7 +107,6 @@ static void connect_to_ap() {
 
    esp_wifi_connect();
 }
-
 static esp_err_t esp_event_handler(void *ctx, system_event_t *event) {
    switch(event->event_id) {
       case SYSTEM_EVENT_STA_START:
@@ -270,12 +232,6 @@ void rtc_mem_read(unsigned int src_block, void *dst, unsigned int length) {
       uint32_t *ram = (uint32_t *) (dst + read_bytes);
       uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (src_block * 4) + read_bytes);
       *ram = READ_PERI_REG(rtc);
-
-      #ifdef ALLOW_USE_PRINTF
-      printf("\nRead from RTC address 0x%X to 0x%X\n", (unsigned int) rtc, (unsigned int) ram);
-      printf("Content of RTC: 0x%X\n", *rtc);
-      printf("Value from RAM: 0x%X, reminder of 4 for memory address: %u\n", *ram, ((unsigned int) ram) % 4);
-      #endif
    }
 }
 
@@ -313,12 +269,6 @@ void rtc_mem_write(unsigned int dst_block, const void *src, unsigned int length)
       uint32_t *ram = (uint32_t *) (src + read_bytes);
       uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (dst_block * 4) + read_bytes);
       WRITE_PERI_REG(rtc, *ram);
-
-      #ifdef ALLOW_USE_PRINTF
-      printf("\nWritten to RTC address 0x%X from 0x%X\n", (unsigned int) rtc, (unsigned int) ram);
-      printf("Value from RAM: 0x%X, reminder of 4 for memory address: %u\n", *ram, ((unsigned int) ram) % 4);
-      printf("Validation of RTC memory: 0x%X\n", READ_PERI_REG(rtc));
-      #endif
    }
 }
 
@@ -551,6 +501,74 @@ char *get_gson_element_value(char *json_string, char *json_element_to_find, bool
    memcpy(returning_value, value, value_length);
    returning_value[value_length] = 0;
    *is_numeric_param = is_numeric;
+   return returning_value;
+}
+
+static bool is_stop_character_in_get_request_parameter(char character) {
+   return character == 0 || character == ' ' || character == '&';
+}
+
+char *get_value_of_get_request_parameter(char *request, char *parameter, bool *is_numeric_param_value,
+      unsigned int *milliseconds_counter) {
+   if (request == NULL || parameter == NULL) {
+      return NULL;
+   }
+
+   char parameter_with_prefix_and_suffix[20];
+   snprintf(parameter_with_prefix_and_suffix, 20, "?%s=", parameter);
+   char *found_param_location = strstr(request, parameter_with_prefix_and_suffix);
+
+   if (found_param_location == NULL) {
+      snprintf(parameter_with_prefix_and_suffix, 20, "&%s=", parameter);
+      found_param_location = strstr(request, parameter_with_prefix_and_suffix);
+   }
+
+   if (found_param_location == NULL) {
+      #ifdef ALLOW_USE_PRINTF
+      printf("\n%s GET parameter wasn't found in following request:\n%s\n", parameter, request);
+      #endif
+
+      return NULL;
+   }
+
+   char *param_value_location = (char *) (found_param_location + 1 + strlen(parameter) + 1);
+
+   unsigned char value_length = 0;
+   bool is_numeric = true;
+
+   while (true) {
+      char *current_character = (char *) (param_value_location + value_length);
+
+      if (is_stop_character_in_get_request_parameter(*current_character)) {
+         break;
+      }
+
+      if ((*current_character < '0' || *current_character > '9') &&
+            !(value_length == 0 && *current_character == '-') && // Exception for "-" sign
+            *current_character != '.') { // Exception for "."
+         is_numeric = false;
+      }
+
+      value_length++;
+   }
+
+   if (value_length == 0) {
+      return NULL;
+   }
+
+   char *returning_value = MALLOC(value_length + 1, milliseconds_counter);
+
+   memcpy(returning_value, param_value_location, value_length);
+   returning_value[value_length] = 0;
+
+   if (is_numeric_param_value != NULL) {
+      *is_numeric_param_value = is_numeric;
+   }
+
+   #ifdef ALLOW_USE_PRINTF
+   printf("Found value of %s parameter is %s\n", parameter, returning_value);
+   #endif
+
    return returning_value;
 }
 

@@ -23,8 +23,6 @@
 
 void *set_string_parameters(const char string[], const char *parameters[]);
 char *generate_post_request(char *request);
-bool compare_strings(char *string1, char *string2);
-char *put_flash_string_into_heap(const char *flash_string, unsigned int allocated_time);
 char *generate_reset_reason();
 void wifi_init_sta(void (*on_connected)(), void (*on_disconnected)(), void (*on_connection)());
 bool is_connected_to_wifi();
@@ -37,4 +35,5 @@ char *get_request_payload(char *already_read_request_content_part, char *request
 void shutdown_and_close_socket(int socket);
 char *get_gson_element_value(char *json_string, char *json_element_to_find, bool *is_numeric_param, unsigned int *milliseconds_counter);
 void disable_wifi_event_handler();
+char *get_value_of_get_request_parameter(char *request, char *parameter, bool *is_numeric_param_value, unsigned int *milliseconds_counter);
 #endif
