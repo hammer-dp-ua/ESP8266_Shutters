@@ -260,7 +260,7 @@
 			<storageModule moduleId="org.eclipse.cdt.core.externalSettings"/>
 		</cconfiguration>
 		<cconfiguration id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854">
-			<storageModule buildSystemId="org.eclipse.cdt.managedbuilder.core.configurationDataProvider" id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" moduleId="org.eclipse.cdt.core.settings" name="ota copy">
+			<storageModule buildSystemId="org.eclipse.cdt.managedbuilder.core.configurationDataProvider" id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" moduleId="org.eclipse.cdt.core.settings" name="Build for OTA and copy">
 				<externalSettings/>
 				<extensions>
 					<extension id="org.eclipse.cdt.core.Cygwin_PE" point="org.eclipse.cdt.core.BinaryParser"/>
@@ -272,7 +272,7 @@
 				</extensions>
 			</storageModule>
 			<storageModule moduleId="cdtBuildSystem" version="4.0.0">
-				<configuration artifactName="${ProjName}" buildProperties="" description="" id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" name="ota copy" parent="org.eclipse.cdt.build.core.emptycfg">
+				<configuration artifactName="${ProjName}" buildProperties="" description="" id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" name="Build for OTA and copy" parent="org.eclipse.cdt.build.core.emptycfg">
 					<folderInfo id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854." name="/" resourcePath="">
 						<toolChain id="cdt.managedbuild.toolchain.gnu.cygwin.base.656961721" name="Cygwin GCC" superClass="cdt.managedbuild.toolchain.gnu.cygwin.base">
 							<targetPlatform archList="all" binaryParser="org.eclipse.cdt.core.Cygwin_PE" id="cdt.managedbuild.target.gnu.platform.cygwin.base.296538775" name="Debug Platform" osList="win32" superClass="cdt.managedbuild.target.gnu.platform.cygwin.base"/>
@@ -311,6 +311,7 @@
 		<configuration configurationName="all">
 			<resource resourceType="PROJECT" workspacePath="/ESP8266_Shutters"/>
 		</configuration>
+		<configuration configurationName="ota copy"/>
 		<configuration configurationName="app-clean"/>
 		<configuration configurationName="ota flash">
 			<resource resourceType="PROJECT" workspacePath="/ESP8266_Shutters"/>

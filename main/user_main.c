@@ -30,6 +30,8 @@ static EventGroupHandle_t general_event_group_g;
 
 static SemaphoreHandle_t wirelessNetworkActionsSemaphore_g;
 
+static TaskHandle_t tcp_server_task_g;
+
 static void milliseconds_counter() {
    milliseconds_counter_g++;
 }
@@ -603,7 +605,7 @@ void on_wifi_connected_task() {
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 1);
    repetitive_ap_connecting_errors_counter_g = 0;
 
-   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, NULL);
+   xTaskCreate(tcp_server_task, "tcp_server_task", configMINIMAL_STACK_SIZE * 3, NULL, 1, &tcp_server_task_g);
    send_status_info();
 
    vTaskDelete(NULL);
@@ -618,9 +620,10 @@ void on_wifi_disconnected_task() {
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
    gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
 
-   xEventGroupSetBits(general_event_group_g, DELETE_TCP_SERVER_TASK_FLAG);
-   close_opened_sockets();
+   //xEventGroupSetBits(general_event_group_g, DELETE_TCP_SERVER_TASK_FLAG);
 
+   vTaskDelete(tcp_server_task_g);
+   close_opened_sockets();
    vTaskDelete(NULL);
 }
 
