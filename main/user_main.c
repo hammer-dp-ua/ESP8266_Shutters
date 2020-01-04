@@ -3,7 +3,7 @@
  *
  * Required connections:
  * GPIO15 to GND
- * GPIO to "+" or to "GND" for flashing
+ * GPIO to "+" OR to "GND" for flashing
  * EN to "+"
  */
 
@@ -347,26 +347,56 @@ static void stop_blinking_on_shutters_activity() {
 }
 
 static void stop_shutters_activity() {
+   #ifdef ROOM_SHUTTER
    gpio_set_level(RELAY_DOWN_PIN, 0);
    gpio_set_level(RELAY_UP_PIN, 0);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   gpio_set_level(RELAY1_DOWN_PIN, 0);
+   gpio_set_level(RELAY1_UP_PIN, 0);
+   gpio_set_level(RELAY2_DOWN_PIN, 0);
+   gpio_set_level(RELAY2_UP_PIN, 0);
+   #endif
    stop_blinking_on_shutters_activity();
 }
 
-static void open_shutters(unsigned char opening_time_sec) {
+static void open_shutters(unsigned char opening_time_sec, unsigned char shutter_no) {
    os_timer_disarm(&shutters_activity_g);
    stop_shutters_activity();
    os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
    os_timer_arm(&shutters_activity_g, ((unsigned int) opening_time_sec) * 1000, false);
+
+   #ifdef ROOM_SHUTTER
    gpio_set_level(RELAY_UP_PIN, 1);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   if (shutter_no == 1) {
+      gpio_set_level(RELAY1_UP_PIN, 1);
+   } else if (shutter_no == 2) {
+      gpio_set_level(RELAY2_UP_PIN, 1);
+   }
+   #endif
+
    start_blinking_on_shutters_opening();
 }
 
-static void close_shutters(unsigned char closing_time_sec) {
+static void close_shutters(unsigned char closing_time_sec, unsigned char shutter_no) {
    os_timer_disarm(&shutters_activity_g);
    stop_shutters_activity();
    os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
    os_timer_arm(&shutters_activity_g, ((unsigned int) closing_time_sec) * 1000, false);
+
+   #ifdef ROOM_SHUTTER
    gpio_set_level(RELAY_DOWN_PIN, 1);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   if (shutter_no == 1) {
+      gpio_set_level(RELAY1_DOWN_PIN, 1);
+   } else if (shutter_no == 2) {
+      gpio_set_level(RELAY2_DOWN_PIN, 1);
+   }
+   #endif
+
    start_blinking_on_shutters_closing();
 }
 
@@ -390,37 +420,40 @@ static void process_request_and_send_response(char *request, int socket) {
       #endif
    }
 
-   bool is_numeric_value = false;
-   char *opening_activity_duration = get_value_of_get_request_parameter(request, "open", &is_numeric_value, &milliseconds_counter_g);
+   bool is_duration_value_numeric = false;
+   char *opening_activity_duration = get_value_of_get_request_parameter(request, "open", &is_duration_value_numeric, &milliseconds_counter_g);
+   bool is_shutter_no_numeric = false;
+   char *shutter_no = get_value_of_get_request_parameter(request, "shutter_no", &is_shutter_no_numeric, &milliseconds_counter_g);
+   unsigned char shutter_no_numeric = 0;
 
-   #ifdef ALLOW_USE_PRINTF
-   printf("Value of JSON 'open':%s, is numeric: %s\n", opening_activity_duration, (is_numeric_value ? "true" : "false"));
-   #endif
+   if (shutter_no != NULL) {
+      if (is_shutter_no_numeric) {
+         shutter_no_numeric = (unsigned char) atoi(shutter_no);
+      }
+
+      FREE(shutter_no);
+   }
 
    if (opening_activity_duration != NULL) {
-      if (is_numeric_value) {
+      if (is_duration_value_numeric) {
          int opening_time = atoi(opening_activity_duration);
 
          if (opening_time > 0) {
-            open_shutters((unsigned char) opening_time);
+            open_shutters((unsigned char) opening_time, shutter_no_numeric);
          }
       }
 
       FREE(opening_activity_duration);
    }
 
-   char *closing_activity_duration = get_value_of_get_request_parameter(request, "close", &is_numeric_value, &milliseconds_counter_g);
-
-   #ifdef ALLOW_USE_PRINTF
-   printf("Value of JSON 'close':%s, is numeric: %s\n", closing_activity_duration, (is_numeric_value ? "true" : "false"));
-   #endif
+   char *closing_activity_duration = get_value_of_get_request_parameter(request, "close", &is_duration_value_numeric, &milliseconds_counter_g);
 
    if (closing_activity_duration != NULL) {
-      if (is_numeric_value) {
+      if (is_duration_value_numeric) {
          int closing_time = atoi(closing_activity_duration);
 
          if (closing_time > 0) {
-            close_shutters((unsigned char) closing_time);
+            close_shutters((unsigned char) closing_time, shutter_no_numeric);
          }
       }
 
@@ -581,8 +614,16 @@ static void tcp_server_task(void *pvParameters) {
 static void pins_config() {
    gpio_config_t output_pins;
    output_pins.mode = GPIO_MODE_OUTPUT;
+
+   #ifdef ROOM_SHUTTER
    output_pins.pin_bit_mask = (1<<AP_CONNECTION_STATUS_LED_PIN) | (1<<SERVER_AVAILABILITY_STATUS_LED_PIN)
          | (1<<RELAY_DOWN_PIN) | (1<<RELAY_UP_PIN);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   output_pins.pin_bit_mask = (1<<AP_CONNECTION_STATUS_LED_PIN) | (1<<SERVER_AVAILABILITY_STATUS_LED_PIN)
+            | (1<<RELAY1_DOWN_PIN) | (1<<RELAY1_UP_PIN) | (1<<RELAY2_DOWN_PIN) | (1<<RELAY2_UP_PIN);
+   #endif
+
    output_pins.pull_up_en = GPIO_PULLUP_DISABLE;
    output_pins.pull_down_en = GPIO_PULLDOWN_DISABLE;
 
@@ -590,8 +631,17 @@ static void pins_config() {
 
    gpio_set_level(AP_CONNECTION_STATUS_LED_PIN, 0);
    gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
+
+   #ifdef ROOM_SHUTTER
    gpio_set_level(RELAY_DOWN_PIN, 0);
    gpio_set_level(RELAY_UP_PIN, 0);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   gpio_set_level(RELAY1_DOWN_PIN, 0);
+   gpio_set_level(RELAY1_UP_PIN, 0);
+   gpio_set_level(RELAY2_DOWN_PIN, 0);
+   gpio_set_level(RELAY2_UP_PIN, 0);
+   #endif
 }
 
 static void close_opened_sockets() {
@@ -687,6 +737,17 @@ void check_errors_amount() {
 
    if (restart) {
       esp_restart();
+   }
+}
+
+static void blink_gpio_task(void *pvParameters) {
+   while (true) {
+      if (gpio_get_level(GPIO_NUM_5)) {
+         gpio_set_level(GPIO_NUM_5, 0);
+      } else {
+         gpio_set_level(GPIO_NUM_5, 1);
+      }
+      vTaskDelay(200 / portTICK_RATE_MS);
    }
 }
 

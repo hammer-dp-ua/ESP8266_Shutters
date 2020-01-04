@@ -26,10 +26,20 @@
 #ifndef MAIN_HEADER
 #define MAIN_HEADER
 
+#ifdef ROOM_SHUTTER
 #define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_14
 #define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_12
 #define RELAY_DOWN_PIN                       GPIO_NUM_4
 #define RELAY_UP_PIN                         GPIO_NUM_5
+#endif
+#ifdef KITCHEN_SHUTTER
+#define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_13
+#define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_2
+#define RELAY1_DOWN_PIN                      GPIO_NUM_12
+#define RELAY1_UP_PIN                        GPIO_NUM_14
+#define RELAY2_DOWN_PIN                      GPIO_NUM_4
+#define RELAY2_UP_PIN                        GPIO_NUM_5
+#endif
 
 #define SERVER_IS_AVAILABLE_FLAG
 #define FIRST_STATUS_INFO_SENT_FLAG (1 << 0)

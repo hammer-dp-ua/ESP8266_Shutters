@@ -152,6 +152,11 @@ static esp_err_t esp_event_handler(void *ctx, system_event_t *event) {
          printf("\nDisconnected from %s, reason: %u\n", event->event_info.disconnected.ssid, event->event_info.disconnected.reason);
          #endif
 
+         if (event->event_info.disconnected.reason == WIFI_REASON_NO_AP_FOUND) {
+            // Sometime occurs after firmware update or flash
+            esp_restart();
+         }
+
          on_wifi_disconnected();
          on_wifi_connection();
          xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
@@ -330,20 +335,20 @@ char *send_request(char *request, unsigned short response_buffer_size, unsigned 
    char *final_response_result = MALLOC(response_buffer_size, invocation_time);
    assert(final_response_result != NULL);
 
-   for (;;) {
-      int send_result = write(socket_id, request, strlen(request));
+   int send_result = write(socket_id, request, strlen(request));
 
-      if (send_result < 0) {
-         #ifdef ALLOW_USE_PRINTF
-         printf("\nError occurred during sending. Error no.: %d, time: %u\n", send_result, *milliseconds_counter);
-         #endif
-
-         break;
-      }
+   if (send_result < 0) {
       #ifdef ALLOW_USE_PRINTF
-      printf("Request has been sent. Socket: %d, time: %u\n", socket_id, *milliseconds_counter);
+      printf("\nError occurred during sending. Error no.: %d, time: %u\n", send_result, *milliseconds_counter);
       #endif
 
+      return NULL;
+   }
+   #ifdef ALLOW_USE_PRINTF
+   printf("Request has been sent. Socket: %d, time: %u\n", socket_id, *milliseconds_counter);
+   #endif
+
+   for (;;) {
       unsigned char tmp_buffer_size = response_buffer_size <= 255 ? response_buffer_size : 255;
       char tmp_buffer[tmp_buffer_size];
       int len = read(socket_id, tmp_buffer, tmp_buffer_size - 1);
