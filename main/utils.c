@@ -237,7 +237,15 @@ void rtc_mem_read(unsigned int src_block, void *dst, unsigned int length) {
       uint32_t *ram = (uint32_t *) (dst + read_bytes);
       uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (src_block * 4) + read_bytes);
       *ram = READ_PERI_REG(rtc);
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nRead from 0x%X RTC address: 0x%X", (unsigned int) rtc, *ram);
+      #endif
    }
+
+   #ifdef ALLOW_USE_PRINTF
+   printf("\n");
+   #endif
 }
 
 /**
@@ -274,7 +282,15 @@ void rtc_mem_write(unsigned int dst_block, const void *src, unsigned int length)
       uint32_t *ram = (uint32_t *) (src + read_bytes);
       uint32_t *rtc = (uint32_t *) (RTC_MEM_BASE + (dst_block * 4) + read_bytes);
       WRITE_PERI_REG(rtc, *ram);
+
+      #ifdef ALLOW_USE_PRINTF
+      printf("\nWrite to 0x%X RTC address: 0x%X", (unsigned int) rtc, *ram);
+      #endif
    }
+
+   #ifdef ALLOW_USE_PRINTF
+   printf("\n");
+   #endif
 }
 
 int connect_to_http_server() {

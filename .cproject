@@ -311,6 +311,7 @@
 		<configuration configurationName="all">
 			<resource resourceType="PROJECT" workspacePath="/ESP8266_Shutters"/>
 		</configuration>
+		<configuration configurationName="Build for OTA and copy"/>
 		<configuration configurationName="ota copy"/>
 		<configuration configurationName="app-clean"/>
 		<configuration configurationName="ota flash">

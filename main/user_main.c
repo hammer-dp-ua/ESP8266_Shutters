@@ -17,6 +17,7 @@ static unsigned char pending_connection_errors_counter_g;
 static unsigned int repetitive_ap_connecting_errors_counter_g = 0;
 static unsigned int repetitive_tcp_server_errors_counter_g = 0;
 
+static shutter_state shutters_states_g[2];
 static int opened_sockets_g[2];
 
 static os_timer_t millisecons_time_serv_g;
@@ -144,6 +145,15 @@ static void on_response_error() {
 void send_status_info_task(void *pvParameters) {
    xSemaphoreTake(wirelessNetworkActionsSemaphore_g, portMAX_DELAY);
    blink_on_send(SERVER_AVAILABILITY_STATUS_LED_PIN);
+   for (unsigned char i = 0; i < 2; i++) {
+      shutter_state current_state = shutters_states_g[i];
+
+      if (current_state.state == SHUTTER_OPENING) {
+         start_blinking_on_shutters_opening();
+      } else if (current_state.state == SHUTTER_CLOSING) {
+         start_blinking_on_shutters_closing();
+      }
+   }
 
    char signal_strength[5];
    snprintf(signal_strength, 5, "%d", signal_strength_g);
@@ -158,6 +168,20 @@ void send_status_info_task(void *pvParameters) {
    snprintf(free_heap_space, 7, "%u", esp_get_free_heap_size());
    char *reset_reason = "";
    char *system_restart_reason = "";
+
+   #ifdef ROOM_SHUTTER
+   char shutters_states[34];
+   snprintf(shutters_states, 34, "{\"shutterNo\":%u, \"shutterState\":%u}",
+         0, shutters_states_g[0].state);
+   #endif
+   #ifdef KITCHEN_SHUTTER
+   char shutters_states[68];
+   shutter_state shutter_1_state = shutters_states_g[0];
+   shutter_state shutter_2_state = shutters_states_g[1];
+
+   snprintf(shutters_states, 68, "{\"shutterNo\":%u, \"shutterState\":%u},{\"shutterNo\":%u, \"shutterState\":%u}",
+         1, shutter_1_state.state, 2, shutter_2_state.state);
+   #endif
 
    if ((xEventGroupGetBits(general_event_group_g) & FIRST_STATUS_INFO_SENT_FLAG) == 0) {
       char build_timestamp_filled[30];
@@ -229,7 +253,7 @@ void send_status_info_task(void *pvParameters) {
 
    const char *request_payload_template_parameters[] =
          {signal_strength, DEVICE_NAME, errors_counter, pending_connection_errors_counter, uptime, build_timestamp, free_heap_space,
-          reset_reason, system_restart_reason, NULL};
+          reset_reason, system_restart_reason, shutters_states, NULL};
    char *request_payload = set_string_parameters(STATUS_INFO_REQUEST_PAYLOAD_TEMPLATE, request_payload_template_parameters);
 
    #ifdef ALLOW_USE_PRINTF
@@ -298,7 +322,7 @@ static void send_status_info() {
       return;
    }
 
-   xTaskCreate(send_status_info_task, SEND_STATUS_INFO_TASK_NAME, configMINIMAL_STACK_SIZE * 2, NULL, 1, NULL);
+   xTaskCreate(send_status_info_task, SEND_STATUS_INFO_TASK_NAME, configMINIMAL_STACK_SIZE * 3, NULL, 1, NULL);
 }
 
 static void schedule_sending_status_info(unsigned int timeout_ms) {
@@ -346,58 +370,182 @@ static void stop_blinking_on_shutters_activity() {
    }
 }
 
-static void stop_shutters_activity() {
+static void stop_shutter_activity() {
+   #ifdef ALLOW_USE_PRINTF
+   printf("\nStopping shutters activity...\n");
+   #endif
+
    #ifdef ROOM_SHUTTER
-   gpio_set_level(RELAY_DOWN_PIN, 0);
-   gpio_set_level(RELAY_UP_PIN, 0);
+   shutter_state current_shutter_state = shutters_states_g[0];
+   bool state_was_changed = false;
+
+   switch (current_shutter_state.state) {
+      case SHUTTER_OPENING:
+         shutters_states_g[0].state = SHUTTER_OPENED;
+         state_was_changed = true;
+         break;
+      case SHUTTER_CLOSING:
+         shutters_states_g[0].state = SHUTTER_CLOSED;
+         state_was_changed = true;
+         break;
+      default:
+         break;
+   }
+
+   if (state_was_changed) {
+      gpio_set_level(RELAY_DOWN_PIN, RELAY_PIN_DISABLED);
+      gpio_set_level(RELAY_UP_PIN, RELAY_PIN_DISABLED);
+   }
+
+   rtc_mem_write(ROOM_SHUTTER_STATE_RTC_ADDRESS, &current_shutter_state.state, 4);
    #endif
+
    #ifdef KITCHEN_SHUTTER
-   gpio_set_level(RELAY1_DOWN_PIN, 0);
-   gpio_set_level(RELAY1_UP_PIN, 0);
-   gpio_set_level(RELAY2_DOWN_PIN, 0);
-   gpio_set_level(RELAY2_UP_PIN, 0);
+   for (unsigned char i = 0; i < 2; i++) {
+      shutter_state current_shutter_state = shutters_states_g[i];
+      bool state_was_changed = false;
+
+      switch (current_shutter_state.state) {
+         case SHUTTER_OPENING:
+            #ifdef ALLOW_USE_PRINTF
+            printf("Shutter '%u' has been opened", current_shutter_state.shutter_no);
+            #endif
+
+            shutters_states_g[i].state = SHUTTER_OPENED;
+            state_was_changed = true;
+            break;
+         case SHUTTER_CLOSING:
+            #ifdef ALLOW_USE_PRINTF
+            printf("Shutter '%u' has been closed", current_shutter_state.shutter_no);
+            #endif
+
+            shutters_states_g[i].state = SHUTTER_CLOSED;
+            state_was_changed = true;
+            break;
+         default:
+            break;
+      }
+
+      if (state_was_changed) {
+         current_shutter_state = shutters_states_g[i];
+
+         if (current_shutter_state.shutter_no == 1) {
+            rtc_mem_write(KITCHEN_SHUTTER_1_STATE_RTC_ADDRESS, &current_shutter_state.state, 4);
+
+            gpio_set_level(RELAY1_DOWN_PIN, RELAY_PIN_DISABLED);
+            gpio_set_level(RELAY1_UP_PIN, RELAY_PIN_DISABLED);
+         } else if (current_shutter_state.shutter_no == 2) {
+            rtc_mem_write(KITCHEN_SHUTTER_2_STATE_RTC_ADDRESS, &current_shutter_state.state, 4);
+
+            gpio_set_level(RELAY2_DOWN_PIN, RELAY_PIN_DISABLED);
+            gpio_set_level(RELAY2_UP_PIN, RELAY_PIN_DISABLED);
+         }
+      }
+   }
    #endif
+
    stop_blinking_on_shutters_activity();
+   send_status_info();
 }
 
-static void open_shutters(unsigned char opening_time_sec, unsigned char shutter_no) {
+static void open_shutter(unsigned char opening_time_sec, unsigned char shutter_no, bool also_send_request) {
+   #ifdef ALLOW_USE_PRINTF
+   printf("\nOpening shutter %u\n", shutter_no);
+   #endif
+
    os_timer_disarm(&shutters_activity_g);
-   stop_shutters_activity();
-   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
+   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutter_activity, NULL);
    os_timer_arm(&shutters_activity_g, ((unsigned int) opening_time_sec) * 1000, false);
 
    #ifdef ROOM_SHUTTER
-   gpio_set_level(RELAY_UP_PIN, 1);
+   shutters_states_g[0].shutter_no = 0;
+   shutters_states_g[0].state = SHUTTER_OPENING;
+   rtc_mem_write(ROOM_SHUTTER_STATE_RTC_ADDRESS, &shutters_states_g[0].state, 4);
+
+   if (gpio_get_level(RELAY_DOWN_PIN) == RELAY_PIN_ENABLED) {
+      gpio_set_level(RELAY_DOWN_PIN, RELAY_PIN_DISABLED);
+      vTaskDelay(500 / portTICK_RATE_MS);
+   }
+   gpio_set_level(RELAY_UP_PIN, RELAY_PIN_ENABLED);
    #endif
+
    #ifdef KITCHEN_SHUTTER
    if (shutter_no == 1) {
-      gpio_set_level(RELAY1_UP_PIN, 1);
+      shutters_states_g[0].shutter_no = 1;
+      shutters_states_g[0].state = SHUTTER_OPENING;
+      rtc_mem_write(KITCHEN_SHUTTER_1_STATE_RTC_ADDRESS, &shutters_states_g[0].state, 4);
+
+      if (gpio_get_level(RELAY1_DOWN_PIN) == RELAY_PIN_ENABLED) {
+         gpio_set_level(RELAY1_DOWN_PIN, RELAY_PIN_DISABLED);
+         vTaskDelay(500 / portTICK_RATE_MS);
+      }
+      gpio_set_level(RELAY1_UP_PIN, RELAY_PIN_ENABLED);
    } else if (shutter_no == 2) {
-      gpio_set_level(RELAY2_UP_PIN, 1);
+      shutters_states_g[1].shutter_no = 2;
+      shutters_states_g[1].state = SHUTTER_OPENING;
+      rtc_mem_write(KITCHEN_SHUTTER_2_STATE_RTC_ADDRESS, &shutters_states_g[1].state, 4);
+
+      if (gpio_get_level(RELAY2_DOWN_PIN) == RELAY_PIN_ENABLED) {
+         gpio_set_level(RELAY2_DOWN_PIN, RELAY_PIN_DISABLED);
+         vTaskDelay(500 / portTICK_RATE_MS);
+      }
+      gpio_set_level(RELAY2_UP_PIN, RELAY_PIN_ENABLED);
    }
    #endif
 
-   start_blinking_on_shutters_opening();
+   if (also_send_request) {
+      send_status_info();
+   }
 }
 
-static void close_shutters(unsigned char closing_time_sec, unsigned char shutter_no) {
+static void close_shutter(unsigned char closing_time_sec, unsigned char shutter_no, bool also_send_request) {
+   #ifdef ALLOW_USE_PRINTF
+   printf("\nClosing shutter %u\n", shutter_no);
+   #endif
+
    os_timer_disarm(&shutters_activity_g);
-   stop_shutters_activity();
-   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutters_activity, NULL);
+   os_timer_setfn(&shutters_activity_g, (os_timer_func_t *) stop_shutter_activity, NULL);
    os_timer_arm(&shutters_activity_g, ((unsigned int) closing_time_sec) * 1000, false);
 
    #ifdef ROOM_SHUTTER
-   gpio_set_level(RELAY_DOWN_PIN, 1);
+   shutters_states_g[0].shutter_no = shutter_no;
+   shutters_states_g[0].state = SHUTTER_CLOSING;
+   rtc_mem_write(ROOM_SHUTTER_STATE_RTC_ADDRESS, &shutters_states_g[0].state, 4);
+
+   if (gpio_get_level(RELAY_UP_PIN) == RELAY_PIN_ENABLED) {
+      gpio_set_level(RELAY_UP_PIN, RELAY_PIN_DISABLED);
+      vTaskDelay(500 / portTICK_RATE_MS);
+   }
+   gpio_set_level(RELAY_DOWN_PIN, RELAY_PIN_ENABLED);
    #endif
+
    #ifdef KITCHEN_SHUTTER
    if (shutter_no == 1) {
-      gpio_set_level(RELAY1_DOWN_PIN, 1);
+      shutters_states_g[0].shutter_no = shutter_no;
+      shutters_states_g[0].state = SHUTTER_CLOSING;
+      rtc_mem_write(KITCHEN_SHUTTER_1_STATE_RTC_ADDRESS, &shutters_states_g[0].state, 4);
+
+      if (gpio_get_level(RELAY1_UP_PIN) == RELAY_PIN_ENABLED) {
+         gpio_set_level(RELAY1_UP_PIN, RELAY_PIN_DISABLED);
+         vTaskDelay(500 / portTICK_RATE_MS);
+      }
+      gpio_set_level(RELAY1_DOWN_PIN, RELAY_PIN_ENABLED);
    } else if (shutter_no == 2) {
-      gpio_set_level(RELAY2_DOWN_PIN, 1);
+      shutters_states_g[1].shutter_no = shutter_no;
+      shutters_states_g[1].state = SHUTTER_CLOSING;
+      rtc_mem_write(KITCHEN_SHUTTER_2_STATE_RTC_ADDRESS, &shutters_states_g[1].state, 4);
+
+      if (gpio_get_level(RELAY2_UP_PIN) == RELAY_PIN_ENABLED) {
+         gpio_set_level(RELAY2_UP_PIN, RELAY_PIN_DISABLED);
+         vTaskDelay(500 / portTICK_RATE_MS);
+      }
+      gpio_set_level(RELAY2_DOWN_PIN, RELAY_PIN_ENABLED);
    }
    #endif
 
-   start_blinking_on_shutters_closing();
+   if (also_send_request) {
+      send_status_info();
+   }
 }
 
 static void process_request_and_send_response(char *request, int socket) {
@@ -439,7 +587,7 @@ static void process_request_and_send_response(char *request, int socket) {
          int opening_time = atoi(opening_activity_duration);
 
          if (opening_time > 0) {
-            open_shutters((unsigned char) opening_time, shutter_no_numeric);
+            open_shutter((unsigned char) opening_time, shutter_no_numeric, true);
          }
       }
 
@@ -453,7 +601,7 @@ static void process_request_and_send_response(char *request, int socket) {
          int closing_time = atoi(closing_activity_duration);
 
          if (closing_time > 0) {
-            close_shutters((unsigned char) closing_time, shutter_no_numeric);
+            close_shutter((unsigned char) closing_time, shutter_no_numeric, true);
          }
       }
 
@@ -621,11 +769,11 @@ static void pins_config() {
    #endif
    #ifdef KITCHEN_SHUTTER
    output_pins.pin_bit_mask = (1<<AP_CONNECTION_STATUS_LED_PIN) | (1<<SERVER_AVAILABILITY_STATUS_LED_PIN)
-            | (1<<RELAY1_DOWN_PIN) | (1<<RELAY1_UP_PIN) | (1<<RELAY2_DOWN_PIN) | (1<<RELAY2_UP_PIN);
+         | (1<<RELAY1_DOWN_PIN) | (1<<RELAY1_UP_PIN) | (1<<RELAY2_DOWN_PIN) | (1<<RELAY2_UP_PIN);
    #endif
 
    output_pins.pull_up_en = GPIO_PULLUP_DISABLE;
-   output_pins.pull_down_en = GPIO_PULLDOWN_DISABLE;
+   output_pins.pull_down_en = GPIO_PULLUP_DISABLE;
 
    gpio_config(&output_pins);
 
@@ -633,14 +781,14 @@ static void pins_config() {
    gpio_set_level(SERVER_AVAILABILITY_STATUS_LED_PIN, 0);
 
    #ifdef ROOM_SHUTTER
-   gpio_set_level(RELAY_DOWN_PIN, 0);
-   gpio_set_level(RELAY_UP_PIN, 0);
+   gpio_set_level(RELAY_DOWN_PIN, RELAY_PIN_DISABLED);
+   gpio_set_level(RELAY_UP_PIN, RELAY_PIN_DISABLED);
    #endif
    #ifdef KITCHEN_SHUTTER
-   gpio_set_level(RELAY1_DOWN_PIN, 0);
-   gpio_set_level(RELAY1_UP_PIN, 0);
-   gpio_set_level(RELAY2_DOWN_PIN, 0);
-   gpio_set_level(RELAY2_UP_PIN, 0);
+   gpio_set_level(RELAY1_DOWN_PIN, RELAY_PIN_DISABLED);
+   gpio_set_level(RELAY1_UP_PIN, RELAY_PIN_DISABLED);
+   gpio_set_level(RELAY2_DOWN_PIN, RELAY_PIN_DISABLED);
+   gpio_set_level(RELAY2_UP_PIN, RELAY_PIN_DISABLED);
    #endif
 }
 
@@ -751,6 +899,46 @@ static void blink_gpio_task(void *pvParameters) {
    }
 }
 
+static void init_shutters_states() {
+   unsigned char closing_time_sec = 30;
+   esp_reset_reason_t rst_info = esp_reset_reason();
+
+   #ifdef ROOM_SHUTTER
+   unsigned int saved_shutter_state;
+   rtc_mem_read(ROOM_SHUTTER_STATE_RTC_ADDRESS, &saved_shutter_state, 4);
+
+   if (saved_shutter_state == 0 || saved_shutter_state > SHUTTER_CLOSED || rst_info == ESP_RST_POWERON ||
+         rst_info == ESP_RST_EXT) {
+      close_shutter(closing_time_sec, 0, false);
+   } else {
+      shutters_states_g[0].shutter_no = 0;
+      shutters_states_g[0].state = saved_shutter_state;
+   }
+   #endif
+
+   #ifdef KITCHEN_SHUTTER
+   unsigned int saved_shutter_1_state;
+   rtc_mem_read(KITCHEN_SHUTTER_1_STATE_RTC_ADDRESS, &saved_shutter_1_state, 4);
+   unsigned int saved_shutter_2_state;
+   rtc_mem_read(KITCHEN_SHUTTER_2_STATE_RTC_ADDRESS, &saved_shutter_2_state, 4);
+
+   if (saved_shutter_1_state == 0 || saved_shutter_1_state > SHUTTER_CLOSED || rst_info == ESP_RST_POWERON ||
+         rst_info == ESP_RST_EXT) {
+      close_shutter(closing_time_sec, 1, false);
+   } else {
+      shutters_states_g[0].shutter_no = 1;
+      shutters_states_g[0].state = saved_shutter_1_state;
+   }
+   if (saved_shutter_2_state == 0 || saved_shutter_2_state > SHUTTER_CLOSED || rst_info == ESP_RST_POWERON ||
+         rst_info == ESP_RST_EXT) {
+      close_shutter(closing_time_sec, 2, false);
+   } else {
+      shutters_states_g[1].shutter_no = 2;
+      shutters_states_g[1].state = saved_shutter_2_state;
+   }
+   #endif
+}
+
 void app_main(void) {
    general_event_group_g = xEventGroupCreate();
 
@@ -774,6 +962,8 @@ void app_main(void) {
    ip_info.gw.addr = inet_addr(OWN_GETAWAY_ADDRESS);
    ip_info.netmask.addr = inet_addr(OWN_NETMASK);
    tcpip_adapter_set_ip_info(TCPIP_ADAPTER_IF_STA, &ip_info);
+
+   init_shutters_states();
 
    wirelessNetworkActionsSemaphore_g = xSemaphoreCreateBinary();
    xSemaphoreGive(wirelessNetworkActionsSemaphore_g);

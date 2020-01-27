@@ -9846,7 +9846,7 @@
 			</provider>
 		</extension>
 	</configuration>
-	<configuration id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" name="ota copy">
+	<configuration id="cdt.managedbuild.toolchain.gnu.cross.base.303442930.1647623301.916947854" name="Build for OTA and copy">
 		<extension point="org.eclipse.cdt.core.LanguageSettingsProvider">
 			<provider id="org.eclipse.cdt.managedbuilder.core.GCCBuildCommandParser">
 				<language id="org.eclipse.cdt.core.gcc">

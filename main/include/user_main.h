@@ -27,8 +27,8 @@
 #define MAIN_HEADER
 
 #ifdef ROOM_SHUTTER
-#define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_14
-#define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_12
+#define AP_CONNECTION_STATUS_LED_PIN         GPIO_NUM_13
+#define SERVER_AVAILABILITY_STATUS_LED_PIN   GPIO_NUM_2
 #define RELAY_DOWN_PIN                       GPIO_NUM_4
 #define RELAY_UP_PIN                         GPIO_NUM_5
 #endif
@@ -41,11 +41,13 @@
 #define RELAY2_UP_PIN                        GPIO_NUM_5
 #endif
 
-#define SERVER_IS_AVAILABLE_FLAG
-#define FIRST_STATUS_INFO_SENT_FLAG (1 << 0)
-#define UPDATE_FIRMWARE_FLAG        (1 << 1)
-#define REQUEST_ERROR_OCCURRED_FLAG (1 << 2)
-#define DELETE_TCP_SERVER_TASK_FLAG (1 << 3)
+#define RELAY_PIN_ENABLED  1
+#define RELAY_PIN_DISABLED 0
+
+#define FIRST_STATUS_INFO_SENT_FLAG    (1 << 0)
+#define UPDATE_FIRMWARE_FLAG           (1 << 1)
+#define REQUEST_ERROR_OCCURRED_FLAG    (1 << 2)
+#define DELETE_TCP_SERVER_TASK_FLAG    (1 << 3)
 
 #define ERRORS_CHECKER_INTERVAL_MS (10 * 1000)
 #define STATUS_REQUESTS_SEND_INTERVAL_MS (60 * 1000)
@@ -56,6 +58,9 @@
 
 #define SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS  64
 #define CONNECTION_ERROR_CODE_RTC_ADDRESS       SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS + 1
+#define ROOM_SHUTTER_STATE_RTC_ADDRESS          SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS + 2
+#define KITCHEN_SHUTTER_1_STATE_RTC_ADDRESS     SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS + 3
+#define KITCHEN_SHUTTER_2_STATE_RTC_ADDRESS     SYSTEM_RESTART_REASON_TYPE_RTC_ADDRESS + 4
 
 typedef enum {
    ACCESS_POINT_CONNECTION_ERROR = 1,
@@ -63,6 +68,18 @@ typedef enum {
    SOFTWARE_UPGRADE,
    TCP_SERVER_ERROR
 } SYSTEM_RESTART_REASON_TYPE;
+
+typedef enum {
+   SHUTTER_OPENING = 1,
+   SHUTTER_CLOSING,
+   SHUTTER_OPENED,
+   SHUTTER_CLOSED
+} SHUTTER_STATES;
+
+typedef struct {
+   unsigned char shutter_no;
+   SHUTTER_STATES state;
+} shutter_state;
 
 const char SEND_STATUS_INFO_TASK_NAME[] = "send_status_info_task";
 
@@ -86,13 +103,16 @@ const char STATUS_INFO_REQUEST_PAYLOAD_TEMPLATE[] =
       "\"buildTimestamp\":\"<6>\","
       "\"freeHeapSpace\":<7>,"
       "\"resetReason\":\"<8>\","
-      "\"systemRestartReason\":\"<9>\""
+      "\"systemRestartReason\":\"<9>\","
+      "\"shutterStates\":[<10>]"
       "}";
 const char UPDATE_FIRMWARE[] = "\"updateFirmware\":true";
 
 static void blink_both_leds();
 static void stop_both_leds_blinking();
 static void close_opened_sockets();
+static void start_blinking_on_shutters_opening();
+static void start_blinking_on_shutters_closing();
 
 #endif
 
